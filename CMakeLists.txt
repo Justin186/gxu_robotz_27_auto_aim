@@ -108,6 +108,18 @@ if(BUILD_NAV)
   find_package(rosidl_typesupport_cpp REQUIRED)
   set(rm_interfaces_DIR ${CMAKE_SOURCE_DIR}/rm_interfaces/share/rm_interfaces/cmake)
   find_package(rm_interfaces REQUIRED)
+
+  # ---- sp_msgs：本仓库的源码包，需要先用 colcon 构建（见 readme）----
+  # 生成物不入库；构造一次即可，之后改 .msg 再重跑那条 colcon 命令。
+  list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/sp_msgs_install/sp_msgs")
+  find_package(sp_msgs QUIET)
+  if(NOT sp_msgs_FOUND)
+    message(FATAL_ERROR
+      "找不到 sp_msgs。它是本仓库的源码包，请先构建：\n"
+      "  colcon build --packages-select sp_msgs --base-paths sp_msgs \\\n"
+      "               --install-base sp_msgs_install --build-base sp_msgs_build")
+  endif()
+
   message(STATUS "ROS2: 已启用导航通信相关代码")
 endif()
 
@@ -283,9 +295,10 @@ endif()
 # ROS2 程序需要能找到 rm_interfaces 的动态库（dlopen 加载 typesupport 时）
 # ============================================================================
 if(BUILD_NAV)
-  function(sp_link_rm_interfaces_rpath tgt)
+  function(sp_link_ros2_rpath tgt)
     if(TARGET ${tgt})
       target_link_options(${tgt} PRIVATE "-Wl,-rpath,${CMAKE_SOURCE_DIR}/rm_interfaces/lib")
+      target_link_options(${tgt} PRIVATE "-Wl,-rpath,${CMAKE_SOURCE_DIR}/sp_msgs_install/sp_msgs/lib")
       target_link_options(${tgt} PRIVATE "-Wl,--disable-new-dtags")
     endif()
   endfunction()
@@ -294,7 +307,7 @@ if(BUILD_NAV)
               sentry sentry_bp sentry_debug sentry_multithread
               standard standard_mpc mt_auto_aim_debug
               auto_aim_sim auto_aim_sim_shm)
-    sp_link_rm_interfaces_rpath(${tgt})
+    sp_link_ros2_rpath(${tgt})
   endforeach()
 endif()
 

@@ -87,6 +87,7 @@ if(BUILD_NAV)
       sensor_msgs
       cv_bridge
       rm_interfaces
+      sp_msgs
       geometry_msgs
       tf2_ros
       tf2_geometry_msgs
