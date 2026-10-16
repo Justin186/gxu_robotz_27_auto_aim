@@ -77,12 +77,10 @@ find_package(nlohmann_json REQUIRED)
 
 # ---- OpenVINO：自瞄 / 打符 / 全向感知 的推理都要用 ----
 if(BUILD_AUTO_AIM OR BUILD_AUTO_BUFF OR BUILD_OMNIPERCEPTION)
-  # 不写死路径：优先 -DOpenVINO_DIR=...，其次探测 Intel 官方压缩包的默认解压位置，
-  # 都没有就交给 find_package 走标准搜索路径（apt 安装的会落在 /usr/lib/cmake/ 下）
-  if(NOT OpenVINO_DIR AND EXISTS "/opt/intel/openvino_2024.6.0/runtime/cmake")
-    set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake"
-        CACHE PATH "OpenVINO 的 CMake 配置目录")
-  endif()
+  # 不写死版本和路径，交给 find_package 走标准搜索：
+  #   - apt 安装的会落在 /usr/lib/cmake/openvino<版本>/
+  #   - Intel 官方压缩包解压后在 /opt/intel/<版本>/runtime/cmake/ 也能被找到
+  # 特殊情况用 -DOpenVINO_DIR=<你的路径> 指定
   find_package(OpenVINO REQUIRED)
   message(STATUS "OpenVINO: ${OpenVINO_DIR}")
 endif()
