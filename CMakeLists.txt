@@ -19,6 +19,7 @@ message(STATUS "--------------------CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}-------
 # 命令行显式指定的 -DBUILD_xxx=ON/OFF 优先于预设。
 # 想完全手动控制就用 -DROBOT=custom。
 # ============================================================================
+
 # 自动发现 cmake/presets/ 下的所有 *.cmake：
 # 新增一个兵种预设只需往那个目录丢一个文件，这里不用改。
 file(GLOB _preset_names RELATIVE "${CMAKE_SOURCE_DIR}/cmake/presets"
@@ -49,10 +50,6 @@ option(BUILD_DEBUG          "调试可视化（rerun，需预先安装 SDK）"  
 option(BUILD_TESTS          "测试程序与调试工具"                    OFF)
 option(BUILD_CALIBRATION    "标定程序"                             ON)
 
-# 相机后端
-option(IO_HIKROBOT   "海康相机"     ON)
-option(IO_MINDVISION "迈德威视相机" ON)
-
 # ---- 开关之间的依赖约束：早报错，别拖到链接阶段 ----
 if(BUILD_AUTO_BUFF AND NOT BUILD_AUTO_AIM)
   message(FATAL_ERROR "BUILD_AUTO_BUFF 依赖 BUILD_AUTO_AIM（auto_buff 链接了 auto_aim）")
@@ -62,9 +59,6 @@ if(BUILD_OMNIPERCEPTION AND NOT BUILD_AUTO_AIM)
 endif()
 if(BUILD_NAV AND NOT BUILD_AUTO_AIM)
   message(FATAL_ERROR "BUILD_NAV（哨兵）依赖 BUILD_AUTO_AIM")
-endif()
-if(NOT IO_HIKROBOT AND NOT IO_MINDVISION)
-  message(FATAL_ERROR "至少需要一个相机后端（IO_HIKROBOT / IO_MINDVISION）")
 endif()
 
 # ============================================================================
@@ -143,7 +137,7 @@ endif()
 # 可执行文件
 # ============================================================================
 
-# ---- 自瞄主程序（重装 / 步兵 / 哨兵 / 无人机）----
+# ---- 自瞄主程序（重装 / 步兵 / 哨兵）----
 if(BUILD_AUTO_AIM)
   add_executable(standard src/standard.cpp)
   target_link_libraries(standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
@@ -245,7 +239,7 @@ endif()
 if(BUILD_TESTS)
   # ---- 只需要 tools + io ----
   foreach(tgt camera_test cboard_test fire_test gimbal_response_test
-              multi_usbcamera_test usbcamera_test dm_test)
+              multi_usbcamera_test usbcamera_test)
     add_executable(${tgt} tests/${tgt}.cpp)
     target_link_libraries(${tgt} ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
   endforeach()
@@ -255,7 +249,7 @@ if(BUILD_TESTS)
     foreach(tgt auto_aim_test camera_detect_test camera_detect_distance_test
                 camera_thread_test detector_video_test usbcamera_detect_test
                 handeye_test minimum_vision_system gimbal_test
-                xrobot_imu_test planner_test planner_test_offline)
+                planner_test planner_test_offline)
       add_executable(${tgt} tests/${tgt}.cpp)
       target_link_libraries(${tgt} ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
     endforeach()
@@ -319,6 +313,5 @@ message(STATUS "  仿真 BUILD_SIM               : ${BUILD_SIM}")
 message(STATUS "  调试 BUILD_DEBUG             : ${BUILD_DEBUG}")
 message(STATUS "  测试 BUILD_TESTS             : ${BUILD_TESTS}")
 message(STATUS "  标定 BUILD_CALIBRATION       : ${BUILD_CALIBRATION}")
-message(STATUS "  相机 IO_HIKROBOT/IO_MINDVISION: ${IO_HIKROBOT}/${IO_MINDVISION}")
 message(STATUS "=================================================")
 message(STATUS "")
