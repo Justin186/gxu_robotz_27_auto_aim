@@ -5,8 +5,8 @@
 #
 # 需要预先安装 rerun_sdk（因为 BUILD_DEBUG=ON）
 #
-# 注意：src/sentry*.cpp 与 io/ros2/ 目前仍是同济遗留代码，其中引用了并不存在的
-# io/ros2/ros2.hpp，所以本预设现在编不过。这部分你们计划重写，重写完再启用。
+# 注意：io/ros2/ros2.cpp 顶部那几个话题名是占位值，等导航那边把接口定下来后
+# 改那几个常量即可；src/sentry*.cpp 的流程和全向感知也仍需按 27 赛季的方案调整。
 set(BUILD_AUTO_AIM        ON  CACHE BOOL "自瞄核心")
 set(BUILD_AUTO_BUFF       ON  CACHE BOOL "打符")
 set(BUILD_OMNIPERCEPTION  ON  CACHE BOOL "全向感知（哨兵）")

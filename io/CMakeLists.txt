@@ -72,7 +72,7 @@ endif()
 # ROS2 桥接（含依赖 ROS2 的仿真 IMU）
 # ---------------------------------------------------------------------------
 if(BUILD_NAV)
-  add_library(io_ros2 STATIC ros2/publish2sim.cpp ros2/subscribe2sim.cpp)
+  add_library(io_ros2 STATIC ros2/publish2sim.cpp ros2/subscribe2sim.cpp ros2/ros2.cpp)
   target_include_directories(io_ros2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
   # sim_imu 内部直接用了 rclcpp / tf2，所以它属于 ROS2 这一组，
