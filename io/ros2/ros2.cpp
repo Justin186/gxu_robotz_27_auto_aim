@@ -1,6 +1,6 @@
 #include "ros2.hpp"
 
-#include <utility>
+#include <cv_bridge/cv_bridge.h>
 
 #include "tools/logger.hpp"
 
@@ -9,13 +9,14 @@ namespace io
 // ============================================================================
 // 与导航节点约定的话题名
 //
-// ★ 这几个名字是占位，等导航那边定了接口之后改这里即可。
+// ★ 集中在这里，等导航那边把接口定下来后改这几个常量即可。
 // ============================================================================
 namespace
 {
-constexpr char kEnemyStatusTopic[] = "enemy_status";
-constexpr char kAutoAimTargetTopic[] = "autoaim_target";
-constexpr char kTargetInfoTopic[] = "target_info";
+constexpr char kTargetTopic[] = "auto_aim_target";
+constexpr char kCmdVelTopic[] = "cmd_vel";
+constexpr char kSentryCmdTopic[] = "sentry_cmd";
+constexpr char kImageTopic[] = "image";
 }  // namespace
 
 ROS2::ROS2()
@@ -30,24 +31,39 @@ ROS2::ROS2()
 
   node_ = std::make_shared<rclcpp::Node>("sentry_ros2");
 
-  // 发布：瞄准目标
-  target_publisher_ = node_->create_publisher<rm_interfaces::msg::Target>(kTargetInfoTopic, 10);
+  // ---------------- 发布 ----------------
+  target_publisher_ = node_->create_publisher<std_msgs::msg::String>(kTargetTopic, 10);
 
-  // 订阅：无敌敌人 ID
-  enemy_status_subscription_ = node_->create_subscription<std_msgs::msg::Int8MultiArray>(
-    kEnemyStatusTopic, 10, [this](std_msgs::msg::Int8MultiArray::SharedPtr msg) {
-      std::lock_guard<std::mutex> lock(mutex_);
-      enemy_status_ = msg->data;
+  // ---------------- 订阅 ----------------
+  cmd_vel_subscription_ = node_->create_subscription<geometry_msgs::msg::Twist>(
+    kCmdVelTopic, 10, [this](geometry_msgs::msg::Twist::SharedPtr msg) {
+      std::lock_guard<std::mutex> lock(cmd_vel_mutex_);
+      latest_cmd_vel_ = *msg;
     });
 
-  // 订阅：导航指定的优先目标
-  autoaim_target_subscription_ = node_->create_subscription<std_msgs::msg::Int8MultiArray>(
-    kAutoAimTargetTopic, 10, [this](std_msgs::msg::Int8MultiArray::SharedPtr msg) {
-      std::lock_guard<std::mutex> lock(mutex_);
-      autoaim_target_ = msg->data;
+  sentry_cmd_subscription_ = node_->create_subscription<sp_msgs::msg::RMUCSentryCmd>(
+    kSentryCmdTopic, 10,
+    [this](sp_msgs::msg::RMUCSentryCmd::SharedPtr msg) { posture_.store(msg->cmd_posture); });
+
+  image_subscription_ = node_->create_subscription<sensor_msgs::msg::Image>(
+    kImageTopic, 10, [this](sensor_msgs::msg::Image::ConstSharedPtr msg) {
+      cv::Mat img;
+      try {
+        img = cv_bridge::toCvCopy(msg, "bgr8")->image;
+      } catch (const cv_bridge::Exception & e) {
+        tools::logger()->warn("ROS2 image convert failed: {}", e.what());
+        return;
+      }
+
+      std::lock_guard<std::mutex> lock(image_mutex_);
+      latest_image_ = std::move(img);
+      // ROS 的 header.stamp 是 system_clock（墙上时钟），本项目内部统一用
+      // steady_clock（单调时钟），两者起点不同、不能直接互转。所以这里记录
+      // 本机收到消息的时刻，语义与 io::Camera 给出的时间戳一致。
+      latest_image_stamp_ = std::chrono::steady_clock::now();
     });
 
-  // 订阅回调需要有人 spin，这里起一条后台线程
+  // 订阅回调要靠 spin 驱动
   spin_thread_ = std::make_unique<std::thread>([this]() { rclcpp::spin(node_); });
 }
 
@@ -62,30 +78,42 @@ ROS2::~ROS2()
   }
 }
 
-std::vector<int8_t> ROS2::subscribe_enemy_status()
+void ROS2::publish_target(const Eigen::Vector4d & target)
 {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return enemy_status_;
+  // TODO(Q1)：目前仍沿用 26 赛季的"逗号字符串"约定，以免导航那边收不到。
+  //   等确定改用 sp_msgs/AutoAimTarget 结构体后，把这里换掉。
+  //   已知问题：std::to_string(double) 只有 6 位小数，位置精度有损失。
+  auto msg = std::make_shared<std_msgs::msg::String>();
+  msg->data = std::to_string(target[0]) + "," + std::to_string(target[1]) + "," +
+              std::to_string(target[2]) + "," + std::to_string(target[3]);
+  target_publisher_->publish(*msg);
 }
 
-std::vector<int8_t> ROS2::subscribe_autoaim_target()
+std::optional<geometry_msgs::msg::Twist> ROS2::cmd_vel()
 {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return autoaim_target_;
+  std::lock_guard<std::mutex> lock(cmd_vel_mutex_);
+  auto out = latest_cmd_vel_;
+  latest_cmd_vel_.reset();
+  return out;
 }
 
-void ROS2::publish(const Eigen::Vector4d & target_info)
-{
-  rm_interfaces::msg::Target msg;
-  msg.header.stamp = node_->now();
-  msg.header.frame_id = "gimbal";
-  msg.tracking = true;
-  msg.position.x = target_info[0];
-  msg.position.y = target_info[1];
-  msg.position.z = target_info[2];
-  msg.yaw = target_info[3];
+uint8_t ROS2::sentry_posture() const { return posture_.load(); }
 
-  target_publisher_->publish(msg);
+bool ROS2::take_image(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp)
+{
+  std::lock_guard<std::mutex> lock(image_mutex_);
+  if (latest_image_.empty()) return false;
+
+  img = std::move(latest_image_);
+  latest_image_.release();
+  timestamp = latest_image_stamp_;
+  return true;
+}
+
+void ROS2::drop_image()
+{
+  std::lock_guard<std::mutex> lock(image_mutex_);
+  latest_image_.release();
 }
 
 }  // namespace io

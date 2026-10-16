@@ -1,70 +1,83 @@
 #ifndef IO__ROS2_HPP
 #define IO__ROS2_HPP
 
-#include <Eigen/Dense>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
-#include <vector>
 
+#include <Eigen/Dense>
+#include <opencv2/opencv.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <std_msgs/msg/int8_multi_array.hpp>
 
-#include "rm_interfaces/msg/target.hpp"
+#include <geometry_msgs/msg/twist.hpp>
+#include <sensor_msgs/msg/image.hpp>
+#include <sp_msgs/msg/rmuc_sentry_cmd.hpp>
+#include <std_msgs/msg/string.hpp>
 
 namespace io
 {
-// 哨兵与导航节点之间的 ROS2 通信层。
+// 哨兵与导航之间的 ROS2 通信层。
 //
-// 话题名与消息类型集中在 ros2.cpp 顶部的常量里，等导航那边把接口定下来之后，
-// 只需要改那几个常量和对 publish() 的字段映射，不用动这里的调用方。
+// 与 26 赛季那版的区别：
+//   - 只起一个 rclcpp::Node（原来 publish2nav / subscribe2nav / 自身一共三个，
+//     而且 publish2nav.cpp 里还把 shared_ptr 赋成 0）
+//   - 取图接口叫 take_image()，语义明确是"取走后清空"（原来的 get_image()
+//     名字是 get、行为是 take，调用方容易重复取到空图）
+//   - 图像时间戳记的是本机收到消息的时刻（steady_clock）。原来把 ROS 的
+//     system_clock 时间戳直接塞进 steady_clock::time_point，两者时钟起点不同，
+//     转出来的时间戳是错的，而这个时间戳会喂给 Perceptron / Solver
+//   - 用 cv_bridge 转换图像，不再手写 memcpy（cv_bridge 本来就已是依赖）
+//   - cmd_vel() 取走后清空、无新指令返回 nullopt，超时交给调用方判断；
+//     原来是在回调里挂一个 1500ms 的 timer 去清队列，既绕又脆弱
 //
-// 说明：ROS2 需要 rclcpp 初始化，但调用方（src/sentry*.cpp、tests/*_test.cpp）
-// 的 main 都没有调 rclcpp::init，所以本类在构造时按需初始化、析构时按需关闭。
-// 一个进程里请只创建一个 ROS2 对象。
+// 话题名集中在 ros2.cpp 顶部，便于和导航那边对齐。
 class ROS2
 {
 public:
   ROS2();
   ~ROS2();
 
-  // ---- 订阅 ----
+  // ---------------- 发往导航 ----------------
 
-  // 裁判系统给出的"无敌"机器人 ID（哨兵据此跳过不该打的装甲）
-  std::vector<int8_t> subscribe_enemy_status();
+  // 当前瞄准目标 (x, y, z, yaw)，世界坐标系
+  void publish_target(const Eigen::Vector4d & target);
 
-  // 导航指定的优先目标 ID
-  std::vector<int8_t> subscribe_autoaim_target();
+  // ---------------- 来自导航 ----------------
 
-  // ---- 发布 ----
+  // 底盘速度指令。取走之后会被清空；没有新指令时返回 nullopt。
+  std::optional<geometry_msgs::msg::Twist> cmd_vel();
 
-  // 当前瞄准目标 (x, y, z, yaw)
-  void publish(const Eigen::Vector4d & target_info);
+  // 哨兵姿态指令（裁判系统 0x0120）：1=进攻 2=防御 3=移动
+  uint8_t sentry_posture() const;
 
-  // 通用发布器创建，供测试程序自建话题用
-  template <typename MsgT>
-  typename rclcpp::Publisher<MsgT>::SharedPtr create_publisher(
-    const std::string & node_name, const std::string & topic, int queue_size)
-  {
-    auto node = std::make_shared<rclcpp::Node>(node_name);
-    extra_nodes_.push_back(node);
-    return node->create_publisher<MsgT>(topic, queue_size);
-  }
+  // 取走导航那边发来的图像。取到返回 true，并把缓存清空。
+  bool take_image(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp);
+
+  // 丢弃缓存的图像
+  void drop_image();
 
 private:
   rclcpp::Node::SharedPtr node_;
 
-  rclcpp::Publisher<rm_interfaces::msg::Target>::SharedPtr target_publisher_;
-  rclcpp::Subscription<std_msgs::msg::Int8MultiArray>::SharedPtr enemy_status_subscription_;
-  rclcpp::Subscription<std_msgs::msg::Int8MultiArray>::SharedPtr autoaim_target_subscription_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr target_publisher_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscription_;
+  rclcpp::Subscription<sp_msgs::msg::RMUCSentryCmd>::SharedPtr sentry_cmd_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription_;
 
-  std::mutex mutex_;
-  std::vector<int8_t> enemy_status_;
-  std::vector<int8_t> autoaim_target_;
+  mutable std::mutex cmd_vel_mutex_;
+  std::optional<geometry_msgs::msg::Twist> latest_cmd_vel_;
 
-  std::vector<rclcpp::Node::SharedPtr> extra_nodes_;
+  std::atomic<uint8_t> posture_{0};
+
+  std::mutex image_mutex_;
+  cv::Mat latest_image_;
+  std::chrono::steady_clock::time_point latest_image_stamp_{};
+
   std::unique_ptr<std::thread> spin_thread_;
 
   // 是否是本对象完成了 rclcpp 初始化（决定析构时要不要 shutdown）

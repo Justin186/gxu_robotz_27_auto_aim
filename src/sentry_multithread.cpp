@@ -78,7 +78,6 @@ int main(int argc, char * argv[])
 
     auto armors = yolo.detect(img);
 
-    decider.get_invincible_armor(ros2.subscribe_enemy_status());
 
     decider.armor_filter(armors);
 
@@ -118,7 +117,7 @@ int main(int argc, char * argv[])
     /// ROS2通信
     Eigen::Vector4d target_info = decider.get_target_info(armors, targets);
 
-    ros2.publish(target_info);
+    ros2.publish_target(target_info);
   }
 
   return 0;
