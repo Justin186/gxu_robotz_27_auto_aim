@@ -1,0 +1,9 @@
+# 二进制文件：禁止行尾转换与文本 diff，避免被 autocrlf 破坏
+*.so    binary
+*.a     binary
+*.bin   binary
+*.onnx  binary
+*.zip   binary
+*.avi   binary
+*.jpg   binary
+*.png   binary

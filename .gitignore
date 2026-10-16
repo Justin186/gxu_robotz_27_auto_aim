@@ -1,0 +1,25 @@
+# ---------- 构建产物 ----------
+build*/
+a.out
+*.o
+
+# ---------- 运行时输出 ----------
+logs/
+records/
+records_*/
+imgs/
+testvideos/
+Camera/
+MvSdkLog/
+watchdog.sh
+kernel.errors.txt
+assets/img_with_q/
+
+# ---------- 大体积测试素材（不入库，见 README） ----------
+assets/demo/
+
+# ---------- 第三方 SDK 压缩包（体积大，不入库；需要时自行放置） ----------
+sdk/
+
+# ---------- 编辑器缓存 ----------
+.cache/
