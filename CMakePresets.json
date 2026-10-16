@@ -9,8 +9,8 @@
     {
       "name": "base",
       "hidden": true,
-      "binaryDir": "${sourceDir}/build/${presetName}",
-      "description": "内部基础预设：每个兵种一个独立 build 目录"
+      "binaryDir": "${sourceDir}/build",
+      "description": "内部基础预设：所有兵种共用 build/ 目录"
     },
     {
       "name": "hero",
