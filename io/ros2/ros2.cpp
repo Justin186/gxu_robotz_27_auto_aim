@@ -32,7 +32,7 @@ ROS2::ROS2()
   node_ = std::make_shared<rclcpp::Node>("sentry_ros2");
 
   // ---------------- 发布 ----------------
-  target_publisher_ = node_->create_publisher<std_msgs::msg::String>(kTargetTopic, 10);
+  target_publisher_ = node_->create_publisher<sp_msgs::msg::AutoAimTarget>(kTargetTopic, 10);
 
   // ---------------- 订阅 ----------------
   cmd_vel_subscription_ = node_->create_subscription<geometry_msgs::msg::Twist>(
@@ -78,15 +78,18 @@ ROS2::~ROS2()
   }
 }
 
-void ROS2::publish_target(const Eigen::Vector4d & target)
+void ROS2::publish_target(const Eigen::Vector4d & target, bool tracking)
 {
-  // TODO(Q1)：目前仍沿用 26 赛季的"逗号字符串"约定，以免导航那边收不到。
-  //   等确定改用 sp_msgs/AutoAimTarget 结构体后，把这里换掉。
-  //   已知问题：std::to_string(double) 只有 6 位小数，位置精度有损失。
-  auto msg = std::make_shared<std_msgs::msg::String>();
-  msg->data = std::to_string(target[0]) + "," + std::to_string(target[1]) + "," +
-              std::to_string(target[2]) + "," + std::to_string(target[3]);
-  target_publisher_->publish(*msg);
+  sp_msgs::msg::AutoAimTarget msg;
+  msg.header.stamp = node_->now();
+  msg.header.frame_id = "world";
+  msg.x = target[0];
+  msg.y = target[1];
+  msg.z = target[2];
+  msg.yaw = target[3];
+  msg.tracking = tracking;
+
+  target_publisher_->publish(msg);
 }
 
 std::optional<geometry_msgs::msg::Twist> ROS2::cmd_vel()

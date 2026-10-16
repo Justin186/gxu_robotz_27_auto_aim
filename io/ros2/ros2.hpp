@@ -16,8 +16,8 @@
 
 #include <geometry_msgs/msg/twist.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sp_msgs/msg/auto_aim_target.hpp>
 #include <sp_msgs/msg/rmuc_sentry_cmd.hpp>
-#include <std_msgs/msg/string.hpp>
 
 namespace io
 {
@@ -26,6 +26,8 @@ namespace io
 // 与 26 赛季那版的区别：
 //   - 只起一个 rclcpp::Node（原来 publish2nav / subscribe2nav / 自身一共三个，
 //     而且 publish2nav.cpp 里还把 shared_ptr 赋成 0）
+//   - 瞄准目标改用 sp_msgs/AutoAimTarget 结构体，不再把 4 个 double 拼成
+//     逗号字符串（那样会丢精度，且字段顺序无类型约束）
 //   - 取图接口叫 take_image()，语义明确是"取走后清空"（原来的 get_image()
 //     名字是 get、行为是 take，调用方容易重复取到空图）
 //   - 图像时间戳记的是本机收到消息的时刻（steady_clock）。原来把 ROS 的
@@ -45,7 +47,8 @@ public:
   // ---------------- 发往导航 ----------------
 
   // 当前瞄准目标 (x, y, z, yaw)，世界坐标系
-  void publish_target(const Eigen::Vector4d & target);
+  // tracking=false 表示本帧无有效目标
+  void publish_target(const Eigen::Vector4d & target, bool tracking = true);
 
   // ---------------- 来自导航 ----------------
 
@@ -64,7 +67,7 @@ public:
 private:
   rclcpp::Node::SharedPtr node_;
 
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr target_publisher_;
+  rclcpp::Publisher<sp_msgs::msg::AutoAimTarget>::SharedPtr target_publisher_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscription_;
   rclcpp::Subscription<sp_msgs::msg::RMUCSentryCmd>::SharedPtr sentry_cmd_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription_;

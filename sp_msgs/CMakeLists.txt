@@ -17,6 +17,7 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/AutoAimTarget.msg"
   "msg/Float32Stamped.msg"
   "msg/RMUCEnemyTracks.msg"
   "msg/RMUCGameStatus.msg"
