@@ -1,9 +1,5 @@
 #include "ros2.hpp"
 
-#include <cv_bridge/cv_bridge.h>
-
-#include "tools/logger.hpp"
-
 namespace io
 {
 // ============================================================================
@@ -16,7 +12,6 @@ namespace
 constexpr char kTargetTopic[] = "auto_aim_target";
 constexpr char kCmdVelTopic[] = "cmd_vel";
 constexpr char kSentryCmdTopic[] = "sentry_cmd";
-constexpr char kImageTopic[] = "image";
 }  // namespace
 
 ROS2::ROS2()
@@ -44,24 +39,6 @@ ROS2::ROS2()
   sentry_cmd_subscription_ = node_->create_subscription<sp_msgs::msg::RMUCSentryCmd>(
     kSentryCmdTopic, 10,
     [this](sp_msgs::msg::RMUCSentryCmd::SharedPtr msg) { posture_.store(msg->cmd_posture); });
-
-  image_subscription_ = node_->create_subscription<sensor_msgs::msg::Image>(
-    kImageTopic, 10, [this](sensor_msgs::msg::Image::ConstSharedPtr msg) {
-      cv::Mat img;
-      try {
-        img = cv_bridge::toCvCopy(msg, "bgr8")->image;
-      } catch (const cv_bridge::Exception & e) {
-        tools::logger()->warn("ROS2 image convert failed: {}", e.what());
-        return;
-      }
-
-      std::lock_guard<std::mutex> lock(image_mutex_);
-      latest_image_ = std::move(img);
-      // ROS 的 header.stamp 是 system_clock（墙上时钟），本项目内部统一用
-      // steady_clock（单调时钟），两者起点不同、不能直接互转。所以这里记录
-      // 本机收到消息的时刻，语义与 io::Camera 给出的时间戳一致。
-      latest_image_stamp_ = std::chrono::steady_clock::now();
-    });
 
   // 订阅回调要靠 spin 驱动
   spin_thread_ = std::make_unique<std::thread>([this]() { rclcpp::spin(node_); });
@@ -101,22 +78,5 @@ std::optional<geometry_msgs::msg::Twist> ROS2::cmd_vel()
 }
 
 uint8_t ROS2::sentry_posture() const { return posture_.load(); }
-
-bool ROS2::take_image(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp)
-{
-  std::lock_guard<std::mutex> lock(image_mutex_);
-  if (latest_image_.empty()) return false;
-
-  img = std::move(latest_image_);
-  latest_image_.release();
-  timestamp = latest_image_stamp_;
-  return true;
-}
-
-void ROS2::drop_image()
-{
-  std::lock_guard<std::mutex> lock(image_mutex_);
-  latest_image_.release();
-}
 
 }  // namespace io

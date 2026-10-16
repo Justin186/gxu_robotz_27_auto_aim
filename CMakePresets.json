@@ -1,0 +1,53 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 19,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "description": "内部基础预设：每个兵种一个独立 build 目录"
+    },
+    {
+      "name": "hero",
+      "inherits": "base",
+      "displayName": "重装（22mm 大弹丸）",
+      "cacheVariables": { "ROBOT": "hero" }
+    },
+    {
+      "name": "infantry",
+      "inherits": "base",
+      "displayName": "步兵（42mm 小弹丸，轮腿 / 狗洞共用）",
+      "cacheVariables": { "ROBOT": "infantry" }
+    },
+    {
+      "name": "sentry",
+      "inherits": "base",
+      "displayName": "哨兵（42mm，含 ROS2 导航通信）",
+      "cacheVariables": { "ROBOT": "sentry" }
+    },
+    {
+      "name": "sim",
+      "inherits": "base",
+      "displayName": "仿真",
+      "cacheVariables": { "ROBOT": "sim" }
+    },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "开发机",
+      "cacheVariables": { "ROBOT": "dev" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "hero", "configurePreset": "hero" },
+    { "name": "infantry", "configurePreset": "infantry" },
+    { "name": "sentry", "configurePreset": "sentry" },
+    { "name": "sim", "configurePreset": "sim" },
+    { "name": "dev", "configurePreset": "dev" }
+  ]
+}

@@ -29,12 +29,44 @@ list(TRANSFORM _preset_names REPLACE "\\.cmake$" "")
 set(ROBOT "custom" CACHE STRING "兵种预设（可选值见 cmake/presets/ 目录）")
 set_property(CACHE ROBOT PROPERTY STRINGS custom ${_preset_names})
 
+# 记录上一次应用过的兵种。CMake 的 CACHE 变量一旦存在，set(X ... CACHE ...) 就
+# 不会再覆盖它 —— 所以同一个 build 目录里把 -DROBOT 从 A 改成 B 时，预设不会
+# 生效，而且不报错，会静默地继续按 A 编。这里显式处理这种切换。
+#
+# 注意：INTERNAL 类型的缓存项每次 set 都会覆盖，所以必须先判断是否已存在，
+# 否则这行会把上一次的记录清空，切换检测永远不触发。
+if(NOT DEFINED SP_APPLIED_ROBOT)
+  set(SP_APPLIED_ROBOT "" CACHE INTERNAL "上一次应用过的兵种预设")
+endif()
+
 if(NOT ROBOT STREQUAL "custom")
   set(_preset "${CMAKE_SOURCE_DIR}/cmake/presets/${ROBOT}.cmake")
   if(NOT EXISTS "${_preset}")
     message(FATAL_ERROR "未知兵种预设 '${ROBOT}'，可选: custom;${_preset_names}")
   endif()
+
+  if(NOT SP_APPLIED_ROBOT STREQUAL "" AND NOT SP_APPLIED_ROBOT STREQUAL ROBOT)
+    # 换兵种了：先清掉上一次预设写进 cache 的值，
+    # 下面 include 时才会重新按新预设的默认值写入。
+    message(STATUS "兵种预设由 '${SP_APPLIED_ROBOT}' 切换为 '${ROBOT}'，重置相关开关")
+    message(STATUS "  注意：命令行里附带的 -DBUILD_xxx 覆盖也会被重置；如需要请再跑一次 cmake")
+    message(STATUS "  更好的做法是用独立目录：cmake --preset ${ROBOT}")
+    foreach(
+      _v
+      BUILD_AUTO_AIM
+      BUILD_AUTO_BUFF
+      BUILD_OMNIPERCEPTION
+      BUILD_NAV
+      BUILD_SIM
+      BUILD_DEBUG
+      BUILD_TESTS
+      BUILD_CALIBRATION)
+      unset(${_v} CACHE)
+    endforeach()
+  endif()
+
   include("${_preset}")
+  set(SP_APPLIED_ROBOT "${ROBOT}" CACHE INTERNAL "上一次应用过的兵种预设" FORCE)
   message(STATUS "--------------------应用兵种预设: ${ROBOT}--------------------")
 endif()
 
