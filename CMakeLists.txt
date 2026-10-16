@@ -60,7 +60,8 @@ if(NOT ROBOT STREQUAL "custom")
       BUILD_SIM
       BUILD_DEBUG
       BUILD_TESTS
-      BUILD_CALIBRATION)
+      BUILD_CALIBRATION
+      GIMBAL_PROTOCOL)
       unset(${_v} CACHE)
     endforeach()
   endif()
