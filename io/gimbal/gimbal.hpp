@@ -8,9 +8,11 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 
 #include <Eigen/Geometry>
 
+#include "io/gimbal/frame.hpp"
 #include "io/gimbal/protocol.hpp"
 #include "io/gimbal/types.hpp"
 #include "serial/serial.h"
@@ -32,7 +34,14 @@ struct GimbalState
 };
 
 // 云台串口：负责收发帧、维护状态、给出插值后的四元数。
-// 具体线上格式由编译期选定的 GimbalProtocol 决定，本类不关心字节长什么样。
+//
+// 具体线上格式由编译期选定的 GimbalProtocol 决定：
+//   - 读线程按协议声明的帧表（rx_frames）按帧头分派，所以同一条串口上可以有
+//     多种帧（哨兵就是「视觉帧 + 导航帧」两种）
+//   - 本类不关心字节长什么样，只做「找帧 → 校验 → 解析 → 存状态」
+//
+// 导航通道（nav_state / send_nav）只有在协议声明 has_nav 时才可用：
+// 用标准协议的兵种去调用会直接编译报错，而不是静默无效。
 class Gimbal
 {
 public:
@@ -45,15 +54,36 @@ public:
   std::string str(GimbalMode mode) const;
   Eigen::Quaterniond q(std::chrono::steady_clock::time_point t);
 
-  // 下发控制量
+  // ---------------- 视觉通道 ----------------
+
   void send(const GimbalCommand & cmd);
   void send(
     bool control, bool fire, float yaw, float yaw_vel, float yaw_acc, float pitch, float pitch_vel,
     float pitch_acc);
 
+  // ---------------- 导航通道（仅哨兵）----------------
+
+  // 最近一帧导航状态（血量 / 热量 / 姿态 / 比赛状态 / 位置…）
+  template <
+    typename P = GimbalProtocol, typename = std::enable_if_t<P::has_nav>>
+  NavFeedback nav_state() const
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return nav_state_;
+  }
+
+  // 下发底盘速度指令
+  template <
+    typename P = GimbalProtocol, typename = std::enable_if_t<P::has_nav>>
+  void send_nav(const NavCommand & cmd)
+  {
+    uint8_t frame[P::max_frame_size];
+    P::tx_encode_nav(cmd, frame);
+    write_frame(frame, P::tx_nav_frame_size);
+  }
+
 protected:
-  // 放在 protected：子类（如 GimbalNode）也要往同一个串口写 nav 帧，
-  // 必须共用同一把锁，否则和 read_thread 的读会互相踩
+  // 放在 protected：将来若有子类也要往同一个串口写帧，必须共用同一把锁
   mutable std::mutex serial_mutex_;
   serial::Serial serial_;
 
@@ -64,12 +94,17 @@ private:
 
   GimbalMode mode_ = GimbalMode::IDLE;
   GimbalState state_;
+  NavFeedback nav_state_;
   tools::ThreadSafeQueue<std::tuple<Eigen::Quaterniond, std::chrono::steady_clock::time_point>>
     queue_{1000};
 
   bool read(uint8_t * buffer, size_t size);
+  void write_frame(const uint8_t * frame, size_t size);
   void read_thread();
   void reconnect();
+
+  // 按帧头首字节在协议的帧表里查一帧；查不到返回 nullptr
+  static const RxFrameSpec * find_rx_frame(uint8_t head0);
 };
 
 }  // namespace io

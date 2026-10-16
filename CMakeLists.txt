@@ -84,10 +84,11 @@ option(BUILD_TESTS          "测试程序与调试工具"                    OFF
 option(BUILD_CALIBRATION    "标定程序"                             ON)
 
 # ---- 云台串口协议（编译期选择，见 io/gimbal/protocol.hpp）----
-# 目前只有 26 赛季标准协议，重装 / 轮腿步兵 / 狗洞步兵共用。
-# 哨兵那套（同一个串口上多一条 nav 帧通道）会在 GimbalNode 那一步一起加进来。
+#   standard  26 赛季标准协议（重装 / 轮腿步兵 / 狗洞步兵共用）
+#   sentry    标准协议的视觉帧 + 一条 nav 帧通道（同一个串口，另一种帧头）
+# 预设会自动带上对应值（见 cmake/presets/*.cmake）。
 set(GIMBAL_PROTOCOL "standard" CACHE STRING "云台串口协议")
-set_property(CACHE GIMBAL_PROTOCOL PROPERTY STRINGS standard)
+set_property(CACHE GIMBAL_PROTOCOL PROPERTY STRINGS standard sentry)
 
 # ---- 开关之间的依赖约束：早报错，别拖到链接阶段 ----
 if(BUILD_AUTO_BUFF AND NOT BUILD_AUTO_AIM)

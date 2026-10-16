@@ -51,8 +51,12 @@ target_link_libraries(io_usbcam PUBLIC ${OpenCV_LIBS} yaml-cpp)
 if(GIMBAL_PROTOCOL STREQUAL "standard")
   set(_gimbal_proto_src gimbal/protocols/standard.cpp)
   set(_gimbal_proto_def GIMBAL_PROTOCOL_STANDARD)
+elseif(GIMBAL_PROTOCOL STREQUAL "sentry")
+  # 哨兵协议的视觉帧复用标准协议，所以两个实现都要编进来
+  set(_gimbal_proto_src gimbal/protocols/standard.cpp gimbal/protocols/sentry.cpp)
+  set(_gimbal_proto_def GIMBAL_PROTOCOL_SENTRY)
 else()
-  message(FATAL_ERROR "未知的云台协议 '${GIMBAL_PROTOCOL}'（目前可选：standard）")
+  message(FATAL_ERROR "未知的云台协议 '${GIMBAL_PROTOCOL}'（可选：standard sentry）")
 endif()
 
 add_library(io_core STATIC camera.cpp cboard.cpp gimbal/gimbal.cpp ${_gimbal_proto_src})

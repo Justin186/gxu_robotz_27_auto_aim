@@ -6,44 +6,48 @@
 
 namespace io
 {
-bool StandardProtocol::rx_check(const uint8_t * frame)
+bool StandardProtocol::rx_check(const RxFrameSpec & spec, const uint8_t * frame)
 {
-  return tools::check_crc16(frame, rx_frame_size);
+  return tools::check_crc16(frame, spec.size);
 }
 
-void StandardProtocol::rx_decode(const uint8_t * frame, GimbalFeedback & out)
+void StandardProtocol::rx_decode(const RxFrameSpec & spec, const uint8_t * frame, RxOut & out)
 {
+  // 本协议只有视觉帧
+  if (spec.kind != RxKind::Vision) return;
+
   RxFrame f;
   std::memcpy(&f, frame, sizeof(f));
 
-  out.q = Eigen::Quaterniond(f.q[0], f.q[1], f.q[2], f.q[3]);
-  out.yaw = f.yaw;
-  out.yaw_vel = f.yaw_vel;
-  out.pitch = f.pitch;
-  out.pitch_vel = f.pitch_vel;
-  out.bullet_speed = f.bullet_speed;
-  out.bullet_count = f.bullet_count;
-  out.yaw_offset = f.yaw_offset;
-  out.pitch_offset = f.pitch_offset;
-  out.raw_mode = f.mode;
+  auto & fb = out.vision;
+  fb.q = Eigen::Quaterniond(f.q[0], f.q[1], f.q[2], f.q[3]);
+  fb.yaw = f.yaw;
+  fb.yaw_vel = f.yaw_vel;
+  fb.pitch = f.pitch;
+  fb.pitch_vel = f.pitch_vel;
+  fb.bullet_speed = f.bullet_speed;
+  fb.bullet_count = f.bullet_count;
+  fb.yaw_offset = f.yaw_offset;
+  fb.pitch_offset = f.pitch_offset;
+  fb.raw_mode = f.mode;
 
-  out.mode_valid = true;
+  fb.mode_valid = true;
   switch (f.mode) {
     case 0:
-      out.mode = GimbalMode::IDLE;
+      fb.mode = GimbalMode::IDLE;
       break;
     case 1:
-      out.mode = GimbalMode::AUTO_AIM;
+      fb.mode = GimbalMode::AUTO_AIM;
       break;
     case 2:
-      out.mode = GimbalMode::SMALL_BUFF;
+      fb.mode = GimbalMode::SMALL_BUFF;
       break;
     case 3:
-      out.mode = GimbalMode::BIG_BUFF;
+      fb.mode = GimbalMode::BIG_BUFF;
       break;
     default:
-      out.mode = GimbalMode::IDLE;
-      out.mode_valid = false;
+      fb.mode = GimbalMode::IDLE;
+      fb.mode_valid = false;
       break;
   }
 }

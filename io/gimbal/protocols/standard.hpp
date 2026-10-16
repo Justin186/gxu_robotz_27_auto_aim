@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "io/gimbal/frame.hpp"
 #include "io/gimbal/types.hpp"
 
 namespace io
@@ -29,6 +30,9 @@ namespace io
 struct StandardProtocol
 {
   static constexpr const char * name() { return "standard"; }
+
+  // 只有视觉帧，没有导航通道
+  static constexpr bool has_nav = false;
 
   struct __attribute__((packed)) RxFrame
   {
@@ -65,16 +69,16 @@ struct StandardProtocol
 
   static constexpr size_t max_frame_size = 64;
 
-  // ---- 上行：电控 → 视觉 ----
-  static constexpr size_t rx_head_size = sizeof(RxFrame::head);
-  static constexpr uint8_t rx_head0 = 'S';
-  static constexpr uint8_t rx_head1 = 'P';
-  static constexpr size_t rx_frame_size = sizeof(RxFrame);
+  // ---- 上行帧表：Gimbal 按帧头首字节在这里查 ----
+  static constexpr RxFrameSpec rx_frames[] = {
+    {'S', 'P', sizeof(RxFrame), RxKind::Vision},
+  };
+  static constexpr size_t rx_frame_count = 1;
 
-  static bool rx_check(const uint8_t * frame);
-  static void rx_decode(const uint8_t * frame, GimbalFeedback & out);
+  static bool rx_check(const RxFrameSpec & spec, const uint8_t * frame);
+  static void rx_decode(const RxFrameSpec & spec, const uint8_t * frame, RxOut & out);
 
-  // ---- 下行：视觉 → 电控 ----
+  // ---- 下行 ----
   static constexpr size_t tx_frame_size = sizeof(TxFrame);
   static void tx_encode(const GimbalCommand & cmd, uint8_t * frame);
 };

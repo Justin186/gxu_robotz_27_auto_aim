@@ -15,3 +15,6 @@ set(BUILD_SIM             OFF CACHE BOOL "仿真接口（共享内存 / 仿真 I
 set(BUILD_DEBUG           ON  CACHE BOOL "调试可视化（rerun，需预先安装 SDK）")
 set(BUILD_TESTS           ON  CACHE BOOL "测试程序与调试工具")
 set(BUILD_CALIBRATION     ON  CACHE BOOL "标定程序")
+
+# 哨兵的云台串口上多一条 nav 帧通道（底盘速度 + 比赛状态）
+set(GIMBAL_PROTOCOL       "sentry" CACHE STRING "云台串口协议")

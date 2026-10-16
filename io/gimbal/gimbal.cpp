@@ -80,13 +80,7 @@ void Gimbal::send(const GimbalCommand & cmd)
 {
   uint8_t frame[GimbalProtocol::max_frame_size];
   GimbalProtocol::tx_encode(cmd, frame);
-
-  std::lock_guard<std::mutex> lock(serial_mutex_);
-  try {
-    serial_.write(frame, GimbalProtocol::tx_frame_size);
-  } catch (const std::exception & e) {
-    tools::logger()->warn("[Gimbal] Failed to write serial: {}", e.what());
-  }
+  write_frame(frame, GimbalProtocol::tx_frame_size);
 }
 
 void Gimbal::send(
@@ -94,6 +88,14 @@ void Gimbal::send(
   float pitch_acc)
 {
   send(GimbalCommand{control, fire, yaw, yaw_vel, yaw_acc, pitch, pitch_vel, pitch_acc});
+}
+
+const RxFrameSpec * Gimbal::find_rx_frame(uint8_t head0)
+{
+  for (size_t i = 0; i < GimbalProtocol::rx_frame_count; ++i) {
+    if (GimbalProtocol::rx_frames[i].head0 == head0) return &GimbalProtocol::rx_frames[i];
+  }
+  return nullptr;
 }
 
 bool Gimbal::read(uint8_t * buffer, size_t size)
@@ -106,9 +108,22 @@ bool Gimbal::read(uint8_t * buffer, size_t size)
   }
 }
 
+void Gimbal::write_frame(const uint8_t * frame, size_t size)
+{
+  std::lock_guard<std::mutex> lock(serial_mutex_);
+  try {
+    serial_.write(frame, size);
+  } catch (const std::exception & e) {
+    tools::logger()->warn("[Gimbal] Failed to write serial: {}", e.what());
+  }
+}
+
 void Gimbal::read_thread()
 {
-  tools::logger()->info("[Gimbal] read_thread started.");
+  tools::logger()->info(
+    "[Gimbal] read_thread started. (protocol: {}, {} 种上行帧)", GimbalProtocol::name(),
+    GimbalProtocol::rx_frame_count);
+
   int error_count = 0;
 
   static_assert(GimbalProtocol::max_frame_size <= 128, "一帧不该超过 128 字节");
@@ -122,49 +137,65 @@ void Gimbal::read_thread()
       continue;
     }
 
-    // 先读帧头对齐。哨兵协议在同一个串口上还有 nav 帧（另一种帧头），
-    // 到时候这里要按帧头分派到不同的帧长与解析函数。
-    if (!read(frame, GimbalProtocol::rx_head_size)) {
+    // ① 先读一个字节，按它在帧表里找是哪一种帧
+    uint8_t head0;
+    if (!read(&head0, 1)) {
       error_count++;
       continue;
     }
 
-    if (frame[0] != GimbalProtocol::rx_head0 || frame[1] != GimbalProtocol::rx_head1) continue;
+    const auto * spec = find_rx_frame(head0);
+    if (spec == nullptr) continue;  // 不在帧表里，丢弃这个字节重新对齐
+
+    frame[0] = head0;
+
+    // ② 校验第二个帧头字节。先校验再往下读，避免帧头不匹配时把后面一帧的开头吃掉
+    uint8_t head1;
+    if (!read(&head1, 1)) {
+      error_count++;
+      continue;
+    }
+    if (head1 != spec->head1) continue;
+    frame[1] = head1;
 
     auto t = std::chrono::steady_clock::now();
 
-    if (!read(
-          frame + GimbalProtocol::rx_head_size,
-          GimbalProtocol::rx_frame_size - GimbalProtocol::rx_head_size)) {
+    // ③ 读完剩下的部分
+    if (!read(frame + 2, spec->size - 2)) {
       error_count++;
       continue;
     }
 
-    if (!GimbalProtocol::rx_check(frame)) {
-      tools::logger()->debug("[Gimbal] CRC16 check failed.");
+    if (!GimbalProtocol::rx_check(*spec, frame)) {
+      tools::logger()->debug("[Gimbal] CRC16 check failed (kind {}).", static_cast<int>(spec->kind));
       continue;
     }
 
     error_count = 0;
 
-    GimbalFeedback fb;
-    GimbalProtocol::rx_decode(frame, fb);
+    RxOut out;
+    GimbalProtocol::rx_decode(*spec, frame, out);
 
-    queue_.push({fb.q, t});
+    if (spec->kind == RxKind::Vision) {
+      const auto & fb = out.vision;
+      queue_.push({fb.q, t});
 
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    state_.yaw = fb.yaw;
-    state_.yaw_vel = fb.yaw_vel;
-    state_.pitch = fb.pitch;
-    state_.pitch_vel = fb.pitch_vel;
-    state_.bullet_speed = fb.bullet_speed;
-    state_.bullet_count = fb.bullet_count;
-    state_.yaw_offset = fb.yaw_offset;
-    state_.pitch_offset = fb.pitch_offset;
-    mode_ = fb.mode;
-    if (!fb.mode_valid) {
-      tools::logger()->warn("[Gimbal] Invalid mode: {}", fb.raw_mode);
+      std::lock_guard<std::mutex> lock(mutex_);
+      state_.yaw = fb.yaw;
+      state_.yaw_vel = fb.yaw_vel;
+      state_.pitch = fb.pitch;
+      state_.pitch_vel = fb.pitch_vel;
+      state_.bullet_speed = fb.bullet_speed;
+      state_.bullet_count = fb.bullet_count;
+      state_.yaw_offset = fb.yaw_offset;
+      state_.pitch_offset = fb.pitch_offset;
+      mode_ = fb.mode;
+      if (!fb.mode_valid) {
+        tools::logger()->warn("[Gimbal] Invalid mode: {}", fb.raw_mode);
+      }
+    } else {
+      std::lock_guard<std::mutex> lock(mutex_);
+      nav_state_ = out.nav;
     }
   }
 
