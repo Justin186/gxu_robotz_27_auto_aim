@@ -45,7 +45,18 @@ target_link_libraries(io_usbcam PUBLIC ${OpenCV_LIBS} yaml-cpp)
 # ---------------------------------------------------------------------------
 # 相机抽象 / C 板 / 云台
 # ---------------------------------------------------------------------------
-add_library(io_core STATIC camera.cpp cboard.cpp gimbal/gimbal.cpp)
+# 云台串口协议：由顶层 GIMBAL_PROTOCOL 开关决定编入哪个实现。
+# 定义必须是 PUBLIC —— io/gimbal/gimbal.hpp 会把协议头带进所有包含它的翻译单元，
+# 只在 PRIVATE 定义的话消费方会因为找不到宏而编译失败。
+if(GIMBAL_PROTOCOL STREQUAL "standard")
+  set(_gimbal_proto_src gimbal/protocols/standard.cpp)
+  set(_gimbal_proto_def GIMBAL_PROTOCOL_STANDARD)
+else()
+  message(FATAL_ERROR "未知的云台协议 '${GIMBAL_PROTOCOL}'（目前可选：standard）")
+endif()
+
+add_library(io_core STATIC camera.cpp cboard.cpp gimbal/gimbal.cpp ${_gimbal_proto_src})
+target_compile_definitions(io_core PUBLIC ${_gimbal_proto_def})
 target_link_libraries(io_core PUBLIC io_hikrobot yaml-cpp serial usb-1.0 pthread ${OpenCV_LIBS})
 
 # ---------------------------------------------------------------------------

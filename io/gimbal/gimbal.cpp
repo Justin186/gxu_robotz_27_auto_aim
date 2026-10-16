@@ -1,10 +1,5 @@
 #include "gimbal.hpp"
 
-#include <algorithm>
-#include <numeric>
-#include <deque>
-
-#include "tools/crc.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
@@ -27,7 +22,7 @@ Gimbal::Gimbal(const std::string & config_path)
   thread_ = std::thread(&Gimbal::read_thread, this);
 
   queue_.pop();
-  tools::logger()->info("[Gimbal] First q received.");
+  tools::logger()->info("[Gimbal] First q received. (protocol: {})", GimbalProtocol::name());
 }
 
 Gimbal::~Gimbal()
@@ -81,20 +76,14 @@ Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t)
   }
 }
 
-void Gimbal::send(io::VisionToGimbal VisionToGimbal)
+void Gimbal::send(const GimbalCommand & cmd)
 {
-  tx_data_.mode = VisionToGimbal.mode;
-  tx_data_.yaw = VisionToGimbal.yaw;
-  tx_data_.yaw_vel = VisionToGimbal.yaw_vel;
-  tx_data_.yaw_acc = VisionToGimbal.yaw_acc;
-  tx_data_.pitch = VisionToGimbal.pitch;
-  tx_data_.pitch_vel = VisionToGimbal.pitch_vel;
-  tx_data_.pitch_acc = VisionToGimbal.pitch_acc;
-  tx_data_.crc16 = tools::get_crc16(
-    reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_) - sizeof(tx_data_.crc16));
+  uint8_t frame[GimbalProtocol::max_frame_size];
+  GimbalProtocol::tx_encode(cmd, frame);
 
+  std::lock_guard<std::mutex> lock(serial_mutex_);
   try {
-    serial_.write(reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_));
+    serial_.write(frame, GimbalProtocol::tx_frame_size);
   } catch (const std::exception & e) {
     tools::logger()->warn("[Gimbal] Failed to write serial: {}", e.what());
   }
@@ -104,21 +93,7 @@ void Gimbal::send(
   bool control, bool fire, float yaw, float yaw_vel, float yaw_acc, float pitch, float pitch_vel,
   float pitch_acc)
 {
-  tx_data_.mode = control ? (fire ? 2 : 1) : 0;
-  tx_data_.yaw = yaw;
-  tx_data_.yaw_vel = yaw_vel;
-  tx_data_.yaw_acc = yaw_acc;
-  tx_data_.pitch = pitch;
-  tx_data_.pitch_vel = pitch_vel;
-  tx_data_.pitch_acc = pitch_acc;
-  tx_data_.crc16 = tools::get_crc16(
-    reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_) - sizeof(tx_data_.crc16));
-
-  try {
-    serial_.write(reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_));
-  } catch (const std::exception & e) {
-    tools::logger()->warn("[Gimbal] Failed to write serial: {}", e.what());
-  }
+  send(GimbalCommand{control, fire, yaw, yaw_vel, yaw_acc, pitch, pitch_vel, pitch_acc});
 }
 
 bool Gimbal::read(uint8_t * buffer, size_t size)
@@ -136,6 +111,9 @@ void Gimbal::read_thread()
   tools::logger()->info("[Gimbal] read_thread started.");
   int error_count = 0;
 
+  static_assert(GimbalProtocol::max_frame_size <= 128, "一帧不该超过 128 字节");
+  uint8_t frame[GimbalProtocol::max_frame_size];
+
   while (!quit_) {
     if (error_count > 10000) {
       error_count = 0;
@@ -144,75 +122,49 @@ void Gimbal::read_thread()
       continue;
     }
 
-    if (!read(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_.head))) {
+    // 先读帧头对齐。哨兵协议在同一个串口上还有 nav 帧（另一种帧头），
+    // 到时候这里要按帧头分派到不同的帧长与解析函数。
+    if (!read(frame, GimbalProtocol::rx_head_size)) {
       error_count++;
       continue;
     }
 
-    if (rx_data_.head[0] != 'S' || rx_data_.head[1] != 'P') continue;
+    if (frame[0] != GimbalProtocol::rx_head0 || frame[1] != GimbalProtocol::rx_head1) continue;
 
     auto t = std::chrono::steady_clock::now();
 
     if (!read(
-          reinterpret_cast<uint8_t *>(&rx_data_) + sizeof(rx_data_.head),
-          sizeof(rx_data_) - sizeof(rx_data_.head))) {
+          frame + GimbalProtocol::rx_head_size,
+          GimbalProtocol::rx_frame_size - GimbalProtocol::rx_head_size)) {
       error_count++;
       continue;
     }
 
-    if (!tools::check_crc16(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_))) {
+    if (!GimbalProtocol::rx_check(frame)) {
       tools::logger()->debug("[Gimbal] CRC16 check failed.");
       continue;
     }
 
     error_count = 0;
-    Eigen::Quaterniond q(rx_data_.q[0], rx_data_.q[1], rx_data_.q[2], rx_data_.q[3]);
-    queue_.push({q, t});
+
+    GimbalFeedback fb;
+    GimbalProtocol::rx_decode(frame, fb);
+
+    queue_.push({fb.q, t});
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // // 对弹速进行平滑滤波（取历史10次，去2个最高、2个最低，剩余取平均）
-    // // 注意：假设裁判系统测出的抖动值存放于 bullet_speed
-    // bullet_speed_history_.push_back(rx_data_.bullet_speed);
-    // if (bullet_speed_history_.size() > 10) {
-    //   bullet_speed_history_.pop_front();
-    // }
-    
-    // if (bullet_speed_history_.size() == 10) {
-    //   std::vector<float> sorted_history(bullet_speed_history_.begin(), bullet_speed_history_.end());
-    //   std::sort(sorted_history.begin(), sorted_history.end());
-    //   float sum = std::accumulate(sorted_history.begin() + 2, sorted_history.end() - 2, 0.0f);
-    //   state_.bullet_speed = sum / 6.0f;
-    // } else {
-    //   state_.bullet_speed = rx_data_.bullet_speed;
-    // }
-
-    state_.yaw = rx_data_.yaw;
-    state_.yaw_vel = rx_data_.yaw_vel;
-    state_.pitch = rx_data_.pitch;
-    state_.pitch_vel = rx_data_.pitch_vel;
-    state_.bullet_speed = rx_data_.bullet_speed;
-    state_.bullet_count = rx_data_.bullet_count;
-    state_.yaw_offset = rx_data_.yaw_offset;
-    state_.pitch_offset = rx_data_.pitch_offset;
-
-    switch (rx_data_.mode) {
-      case 0:
-        mode_ = GimbalMode::IDLE;
-        break;
-      case 1:
-        mode_ = GimbalMode::AUTO_AIM;
-        break;
-      case 2:
-        mode_ = GimbalMode::SMALL_BUFF;
-        break;
-      case 3:
-        mode_ = GimbalMode::BIG_BUFF;
-        break;
-      default:
-        mode_ = GimbalMode::IDLE;
-        tools::logger()->warn("[Gimbal] Invalid mode: {}", rx_data_.mode);
-        break;
+    state_.yaw = fb.yaw;
+    state_.yaw_vel = fb.yaw_vel;
+    state_.pitch = fb.pitch;
+    state_.pitch_vel = fb.pitch_vel;
+    state_.bullet_speed = fb.bullet_speed;
+    state_.bullet_count = fb.bullet_count;
+    state_.yaw_offset = fb.yaw_offset;
+    state_.pitch_offset = fb.pitch_offset;
+    mode_ = fb.mode;
+    if (!fb.mode_valid) {
+      tools::logger()->warn("[Gimbal] Invalid mode: {}", fb.raw_mode);
     }
   }
 

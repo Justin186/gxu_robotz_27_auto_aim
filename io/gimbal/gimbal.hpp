@@ -1,73 +1,38 @@
 #ifndef IO__GIMBAL_HPP
 #define IO__GIMBAL_HPP
 
-#include <Eigen/Geometry>
 #include <atomic>
 #include <chrono>
-#include <deque>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <tuple>
 
+#include <Eigen/Geometry>
+
+#include "io/gimbal/protocol.hpp"
+#include "io/gimbal/types.hpp"
 #include "serial/serial.h"
 #include "tools/thread_safe_queue.hpp"
 
 namespace io
 {
-struct __attribute__((packed)) GimbalToVision
-{
-  uint8_t head[2] = {'S', 'P'};
-  uint8_t mode;  // 0: 空闲, 1: 自瞄, 2: 小符, 3: 大符
-  float q[4];    // wxyz顺序
-  float yaw;
-  float yaw_vel;
-  float pitch;
-  float pitch_vel;
-  float bullet_speed;
-  uint16_t bullet_count;  // 子弹累计发送次数
-  int8_t yaw_offset;
-  int8_t pitch_offset;
-  uint16_t crc16;
-};
-
-static_assert(sizeof(GimbalToVision) <= 64);
-
-struct __attribute__((packed)) VisionToGimbal
-{
-  uint8_t head[2] = {'S', 'P'};
-  uint8_t mode;  // 0: 不控制, 1: 控制云台但不开火，2: 控制云台且开火
-  float yaw;
-  float yaw_vel;
-  float yaw_acc;
-  float pitch;
-  float pitch_vel;
-  float pitch_acc;
-  uint16_t crc16;
-};
-
-static_assert(sizeof(VisionToGimbal) <= 64);
-
-enum class GimbalMode
-{
-  IDLE,        // 空闲
-  AUTO_AIM,    // 自瞄
-  SMALL_BUFF,  // 小符
-  BIG_BUFF     // 大符
-};
-
+// 云台状态快照（与协议无关）
 struct GimbalState
 {
-  float yaw;
-  float yaw_vel;
-  float pitch;
-  float pitch_vel;
-  float bullet_speed;
-  uint16_t bullet_count;
-  int8_t yaw_offset;
-  int8_t pitch_offset;
+  float yaw = 0;
+  float yaw_vel = 0;
+  float pitch = 0;
+  float pitch_vel = 0;
+  float bullet_speed = 0;
+  uint16_t bullet_count = 0;
+  int8_t yaw_offset = 0;
+  int8_t pitch_offset = 0;
 };
 
+// 云台串口：负责收发帧、维护状态、给出插值后的四元数。
+// 具体线上格式由编译期选定的 GimbalProtocol 决定，本类不关心字节长什么样。
 class Gimbal
 {
 public:
@@ -80,25 +45,25 @@ public:
   std::string str(GimbalMode mode) const;
   Eigen::Quaterniond q(std::chrono::steady_clock::time_point t);
 
+  // 下发控制量
+  void send(const GimbalCommand & cmd);
   void send(
     bool control, bool fire, float yaw, float yaw_vel, float yaw_acc, float pitch, float pitch_vel,
     float pitch_acc);
 
-  void send(io::VisionToGimbal VisionToGimbal);
-
-private:
+protected:
+  // 放在 protected：子类（如 GimbalNode）也要往同一个串口写 nav 帧，
+  // 必须共用同一把锁，否则和 read_thread 的读会互相踩
+  mutable std::mutex serial_mutex_;
   serial::Serial serial_;
 
+private:
   std::thread thread_;
   std::atomic<bool> quit_ = false;
   mutable std::mutex mutex_;
 
-  GimbalToVision rx_data_;
-  VisionToGimbal tx_data_;
-
   GimbalMode mode_ = GimbalMode::IDLE;
   GimbalState state_;
-  std::deque<float> bullet_speed_history_;
   tools::ThreadSafeQueue<std::tuple<Eigen::Quaterniond, std::chrono::steady_clock::time_point>>
     queue_{1000};
 
