@@ -275,11 +275,10 @@ if(BUILD_CALIBRATION)
   target_link_libraries(split_video ${OpenCV_LIBS} fmt::fmt tools)
   target_link_libraries(ypr_to_rotation_matrix ${OpenCV_LIBS} fmt::fmt tools)
 
-  # capture_gimbal 用到了共享内存 IPC，所以跟着 BUILD_SIM 走
-  if(BUILD_SIM)
-    add_executable(capture_gimbal calibration/capture_gimbal.cpp)
-    target_link_libraries(capture_gimbal ${OpenCV_LIBS} fmt::fmt tools io)
-  endif()
+  # capture_gimbal 用真相机 + 真云台（configs/calibration.yaml），与仿真无关。
+  # 26 赛季 sim 分支曾把它改成读共享内存，这里恢复成 main 的版本。
+  add_executable(capture_gimbal calibration/capture_gimbal.cpp)
+  target_link_libraries(capture_gimbal ${OpenCV_LIBS} fmt::fmt tools io)
 endif()
 
 # ============================================================================
