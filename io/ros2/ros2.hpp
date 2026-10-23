@@ -15,22 +15,24 @@
 
 #include <geometry_msgs/msg/twist.hpp>
 #include <sp_msgs/msg/auto_aim_target.hpp>
+#include <sp_msgs/msg/rmuc_game_status.hpp>
+#include <sp_msgs/msg/rmuc_robot_buff.hpp>
+#include <sp_msgs/msg/rmuc_robot_status.hpp>
 #include <sp_msgs/msg/rmuc_sentry_cmd.hpp>
+
+#include "io/gimbal/types.hpp"
 
 namespace io
 {
 // 哨兵与导航之间的 ROS2 通信层。
 //
 // 与 26 赛季那版的区别：
-//   - 只起一个 rclcpp::Node（原来 publish2nav / subscribe2nav / 自身一共三个，
-//     而且 publish2nav.cpp 里还把 shared_ptr 赋成 0）
-//   - 瞄准目标改用 sp_msgs/AutoAimTarget 结构体，不再把 4 个 double 拼成
-//     逗号字符串（那样会丢精度，且字段顺序无类型约束）
-//   - 不再从 ROS 取图（26 赛季订阅 /odin1/image 那套已不需要），
-//     因此原来那个把 system_clock 时间戳硬塞进 steady_clock 的错误也一并消失；
-//     主相机仍走 io::Camera，侧向相机走 io::USBCamera
-//   - cmd_vel() 取走后清空、无新指令返回 nullopt，超时交给调用方判断；
-//     原来是在回调里挂一个 1500ms 的 timer 去清队列，既绕又脆弱
+//   - 只起一个 rclcpp::Node（原来 publish2nav / subscribe2nav / 自身一共三个）
+//   - 瞄准目标改用 sp_msgs/AutoAimTarget 结构体，不再把 4 个 double 拼成逗号字符串
+//   - 不再从 ROS 取图，因此原来那个把 system_clock 时间戳硬塞进 steady_clock
+//     的错误也一并消失
+//   - cmd_vel() 取走后清空、无新指令返回 nullopt，超时由调用方判断
+//   - 新增 publish_referee()：把电控那边来的血量/热量/比赛阶段等转成 ROS2 话题
 //
 // 话题名集中在 ros2.cpp 顶部，便于和导航那边对齐。
 class ROS2
@@ -41,9 +43,12 @@ public:
 
   // ---------------- 发往导航 ----------------
 
-  // 当前瞄准目标 (x, y, z, yaw)，世界坐标系
-  // tracking=false 表示本帧无有效目标
+  // 当前瞄准目标 (x, y, z, yaw)，世界坐标系；tracking=false 表示本帧无有效目标
   void publish_target(const Eigen::Vector4d & target, bool tracking = true);
+
+  // 裁判系统 / 机器人状态（来自电控，转发给导航）
+  // is_detect_enemy 由视觉侧提供：本帧主相机是否看到了敌人
+  void publish_referee(const NavFeedback & nav, bool is_detect_enemy);
 
   // ---------------- 来自导航 ----------------
 
@@ -57,6 +62,10 @@ private:
   rclcpp::Node::SharedPtr node_;
 
   rclcpp::Publisher<sp_msgs::msg::AutoAimTarget>::SharedPtr target_publisher_;
+  rclcpp::Publisher<sp_msgs::msg::RMUCRobotStatus>::SharedPtr robot_status_publisher_;
+  rclcpp::Publisher<sp_msgs::msg::RMUCGameStatus>::SharedPtr game_status_publisher_;
+  rclcpp::Publisher<sp_msgs::msg::RMUCRobotBuff>::SharedPtr robot_buff_publisher_;
+
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscription_;
   rclcpp::Subscription<sp_msgs::msg::RMUCSentryCmd>::SharedPtr sentry_cmd_subscription_;
 

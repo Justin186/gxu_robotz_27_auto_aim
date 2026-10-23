@@ -29,6 +29,9 @@ struct SentryProtocol
   static constexpr const char * name() { return "sentry"; }
   static constexpr bool has_nav = true;
 
+  // 电控在反馈帧里带 yaw/pitch 稳态补偿偏置（沿用标准协议那套视觉帧）
+  static constexpr bool has_gimbal_offset = true;
+
   // 视觉帧复用标准协议的定义
   using VisionRx = StandardProtocol::RxFrame;
   using VisionTx = StandardProtocol::TxFrame;

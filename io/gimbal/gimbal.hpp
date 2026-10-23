@@ -108,6 +108,10 @@ private:
   // "字节序配错了"的提示只打一次，避免刷屏
   std::atomic<bool> crc_hint_printed_{false};
 
+  // 有的电控把 pitch 的正负搞反了，由 config 里的 pitch_sign 指定（1 或 -1）。
+  // 收发两个方向各翻一次，业务代码一律按"抬头为正"写，不再手写负号。
+  float pitch_sign_ = 1.0f;
+
   tools::ThreadSafeQueue<std::tuple<Eigen::Quaterniond, std::chrono::steady_clock::time_point>>
     queue_{1000};
 

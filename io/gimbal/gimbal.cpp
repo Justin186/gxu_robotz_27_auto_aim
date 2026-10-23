@@ -20,7 +20,8 @@ Gimbal::Gimbal(const std::string & config_path)
   auto com_port = tools::read<std::string>(yaml, "com_port");
 
   // ---- 与电控的约定差异：集中在这里显式读取，不再散到业务代码里 ----
-  // 不同电控把 CRC 写进帧尾两字节的顺序不一样：
+
+  // CRC 写进帧尾两字节的顺序：
   //   little —— 把 CRC 塞进 packed 结构体再整体发送（x86 / ARM 的自然结果）
   //   big    —— 逐字节按高字节优先拼帧
   auto crc_order_str = tools::read<std::string>(yaml, "crc_byte_order", "little");
@@ -35,6 +36,9 @@ Gimbal::Gimbal(const std::string & config_path)
     crc_order_ = tools::CrcByteOrder::Little;
   }
 
+  // pitch 的正负：有的电控把抬头当负方向，用 -1 翻过来
+  pitch_sign_ = tools::read<int>(yaml, "pitch_sign", 1) < 0 ? -1.0f : 1.0f;
+
   try {
     serial_.setPort(com_port);
     serial_.open();
@@ -43,12 +47,17 @@ Gimbal::Gimbal(const std::string & config_path)
     exit(1);
   }
 
+  // 在等第一帧之前就把这台机器"和电控对过哪些约定"打出来，
+  // 免得电控没上电时看不到任何信息
+  tools::logger()->info(
+    "[Gimbal] 协议={}, crc_byte_order={}, pitch_sign={}, 偏置={}, 导航通道={}", GimbalProtocol::name(),
+    order_name(crc_order_), pitch_sign_ > 0 ? 1 : -1,
+    GimbalProtocol::has_gimbal_offset ? "带" : "不带", GimbalProtocol::has_nav ? "有" : "无");
+
   thread_ = std::thread(&Gimbal::read_thread, this);
 
   queue_.pop();
-  tools::logger()->info(
-    "[Gimbal] First q received. (protocol: {}, crc_byte_order: {})", GimbalProtocol::name(),
-    order_name(crc_order_));
+  tools::logger()->info("[Gimbal] First q received.");
 }
 
 Gimbal::~Gimbal()
@@ -104,8 +113,14 @@ Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t)
 
 void Gimbal::send(const GimbalCommand & cmd)
 {
+  // 内部约定（抬头为正）→ 这块电控的实际约定
+  GimbalCommand adj = cmd;
+  adj.pitch *= pitch_sign_;
+  adj.pitch_vel *= pitch_sign_;
+  adj.pitch_acc *= pitch_sign_;
+
   uint8_t frame[GimbalProtocol::max_frame_size];
-  GimbalProtocol::tx_encode(cmd, frame, crc_order_);
+  GimbalProtocol::tx_encode(adj, frame, crc_order_);
   write_frame(frame, GimbalProtocol::tx_frame_size);
 }
 
@@ -147,8 +162,7 @@ void Gimbal::write_frame(const uint8_t * frame, size_t size)
 void Gimbal::read_thread()
 {
   tools::logger()->info(
-    "[Gimbal] read_thread started. (protocol: {}, {} 种上行帧, crc_byte_order: {})",
-    GimbalProtocol::name(), GimbalProtocol::rx_frame_count, order_name(crc_order_));
+    "[Gimbal] read_thread started. ({} 种上行帧)", GimbalProtocol::rx_frame_count);
 
   int error_count = 0;
 
@@ -195,12 +209,12 @@ void Gimbal::read_thread()
     if (!GimbalProtocol::rx_check(*spec, frame, crc_order_)) {
       // 用另一种字节序再试一次：命中就说明电控的约定和我们配的不一样。
       // 只打日志提示，绝不采信 —— 免得把真·校验失败也放过去。
-      const auto other =
-        crc_order_ == tools::CrcByteOrder::Big ? tools::CrcByteOrder::Little : tools::CrcByteOrder::Big;
+      const auto other = crc_order_ == tools::CrcByteOrder::Big ? tools::CrcByteOrder::Little
+                                                                : tools::CrcByteOrder::Big;
       if (GimbalProtocol::rx_check(*spec, frame, other) && !crc_hint_printed_.exchange(true)) {
         tools::logger()->warn(
           "[Gimbal] CRC 按 {} 校验失败、按 {} 通过 —— 这块电控的 CRC 字节序很可能是 {}。"
-          "请把配置里的 crc_byte_order 改成 \"{}\"（改完需要重新上电，不需要重新编译）",
+          "请把配置里的 crc_byte_order 改成 \"{}\"（改完不需要重新编译）",
           order_name(crc_order_), order_name(other), order_name(other), order_name(other));
       } else if (!crc_hint_printed_.load()) {
         tools::logger()->debug(
@@ -215,7 +229,12 @@ void Gimbal::read_thread()
     GimbalProtocol::rx_decode(*spec, frame, out);
 
     if (spec->kind == RxKind::Vision) {
-      const auto & fb = out.vision;
+      auto & fb = out.vision;
+
+      // 这块电控的实际符号约定 → 内部约定（抬头为正）
+      fb.pitch *= pitch_sign_;
+      fb.pitch_vel *= pitch_sign_;
+
       queue_.push({fb.q, t});
 
       std::lock_guard<std::mutex> lock(mutex_);

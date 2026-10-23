@@ -12,6 +12,9 @@ namespace
 constexpr char kTargetTopic[] = "auto_aim_target";
 constexpr char kCmdVelTopic[] = "cmd_vel";
 constexpr char kSentryCmdTopic[] = "sentry_cmd";
+constexpr char kRobotStatusTopic[] = "robot_status";
+constexpr char kGameStatusTopic[] = "game_status";
+constexpr char kRobotBuffTopic[] = "robot_buff";
 }  // namespace
 
 ROS2::ROS2()
@@ -28,6 +31,10 @@ ROS2::ROS2()
 
   // ---------------- 发布 ----------------
   target_publisher_ = node_->create_publisher<sp_msgs::msg::AutoAimTarget>(kTargetTopic, 10);
+  robot_status_publisher_ =
+    node_->create_publisher<sp_msgs::msg::RMUCRobotStatus>(kRobotStatusTopic, 10);
+  game_status_publisher_ = node_->create_publisher<sp_msgs::msg::RMUCGameStatus>(kGameStatusTopic, 10);
+  robot_buff_publisher_ = node_->create_publisher<sp_msgs::msg::RMUCRobotBuff>(kRobotBuffTopic, 10);
 
   // ---------------- 订阅 ----------------
   cmd_vel_subscription_ = node_->create_subscription<geometry_msgs::msg::Twist>(
@@ -67,6 +74,32 @@ void ROS2::publish_target(const Eigen::Vector4d & target, bool tracking)
   msg.tracking = tracking;
 
   target_publisher_->publish(msg);
+}
+
+void ROS2::publish_referee(const NavFeedback & nav, bool is_detect_enemy)
+{
+  const auto stamp = node_->now();
+
+  sp_msgs::msg::RMUCGameStatus game;
+  game.header.stamp = stamp;
+  game.game_progress = nav.game_progress;
+  game.stage_remain_time = nav.stage_remain_time;
+  game_status_publisher_->publish(game);
+
+  sp_msgs::msg::RMUCRobotStatus robot;
+  robot.header.stamp = stamp;
+  robot.current_hp = nav.current_hp;
+  robot.shooter_heat = nav.shooter_17mm_barrel_heat;
+  robot.ammo_allow = nav.projectile_allowance_17mm;
+  robot.outpost_hp = nav.outpost_Hp;
+  robot.base_hp = nav.base_Hp;
+  robot.is_detect_enemy = is_detect_enemy;
+  robot_status_publisher_->publish(robot);
+
+  sp_msgs::msg::RMUCRobotBuff buff;
+  buff.header.stamp = stamp;
+  buff.vulnerability_pct = nav.vulnerability_buff;
+  robot_buff_publisher_->publish(buff);
 }
 
 std::optional<geometry_msgs::msg::Twist> ROS2::cmd_vel()
