@@ -90,6 +90,10 @@ option(BUILD_CALIBRATION    "标定程序"                             ON)
 set(GIMBAL_PROTOCOL "standard" CACHE STRING "云台串口协议")
 set_property(CACHE GIMBAL_PROTOCOL PROPERTY STRINGS standard sentry)
 
+# 反馈帧里带不带 yaw/pitch 稳态补偿偏置 —— 决定上行帧是 45 字节还是 43 字节。
+# 电控没实现这两个字节时必须关掉，否则整帧错位（症状：收不到帧或 CRC 一直失败）。
+option(GIMBAL_HAS_OFFSET "云台反馈帧里带 yaw/pitch 稳态补偿偏置" ON)
+
 # ---- 开关之间的依赖约束：早报错，别拖到链接阶段 ----
 if(BUILD_AUTO_BUFF AND NOT BUILD_AUTO_AIM)
   message(FATAL_ERROR "BUILD_AUTO_BUFF 依赖 BUILD_AUTO_AIM（auto_buff 链接了 auto_aim）")

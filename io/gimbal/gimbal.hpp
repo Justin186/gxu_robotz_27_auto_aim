@@ -112,12 +112,6 @@ private:
   // 收发两个方向各翻一次，业务代码一律按"抬头为正"写，不再手写负号。
   float pitch_sign_ = 1.0f;
 
-  // 反馈帧里的 yaw/pitch 稳态补偿偏置要不要用（config 的 use_gimbal_offset）。
-  // 注意这只影响"用不用"，不改变帧布局 —— 所以运行期可切、可测。
-  // 如果某块电控的帧里压根没有这两个字节，那是另一份协议实现（帧长不同），
-  // 不是这个开关能表达的。
-  bool use_gimbal_offset_ = true;
-
   tools::ThreadSafeQueue<std::tuple<Eigen::Quaterniond, std::chrono::steady_clock::time_point>>
     queue_{1000};
 
