@@ -238,14 +238,10 @@ endif()
 
 # ---- 哨兵 ----
 if(BUILD_NAV AND BUILD_OMNIPERCEPTION)
+  # 27 赛季主程序。原来的 sentry_bp / sentry_debug / sentry_multithread
+  # 是同济遗留、从未启用，已删除；调试图等主程序上机跑通后再按实际需要加。
   add_executable(sentry src/sentry.cpp)
-  add_executable(sentry_bp src/sentry_bp.cpp)
-  add_executable(sentry_debug src/sentry_debug.cpp)
-  add_executable(sentry_multithread src/sentry_multithread.cpp)
-
-  foreach(tgt sentry sentry_bp sentry_debug sentry_multithread)
-    target_link_libraries(${tgt} ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-  endforeach()
+  target_link_libraries(sentry ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
 endif()
 
 # ---- 调试可视化（rerun）----
@@ -348,7 +344,7 @@ if(BUILD_NAV)
   endfunction()
 
   foreach(tgt publish_test subscribe_test topic_loop_test
-              sentry sentry_bp sentry_debug sentry_multithread
+              sentry
               standard standard_mpc mt_auto_aim_debug
               auto_aim_sim auto_aim_sim_shm)
     sp_link_ros2_rpath(${tgt})
