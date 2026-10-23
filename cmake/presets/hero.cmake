@@ -13,3 +13,7 @@ set(BUILD_SIM             OFF CACHE BOOL "仿真接口（共享内存 / 仿真 I
 set(BUILD_DEBUG           ON  CACHE BOOL "调试可视化（rerun，需预先安装 SDK）")
 set(BUILD_TESTS           ON  CACHE BOOL "测试程序与调试工具")
 set(BUILD_CALIBRATION     ON  CACHE BOOL "标定程序")
+
+# 云台串口（与电控的约定，见 io/gimbal/protocol.hpp / types.hpp）
+set(GIMBAL_PROTOCOL       "standard" CACHE STRING "云台串口协议")
+set(GIMBAL_HAS_OFFSET     ON  CACHE BOOL "反馈帧带 yaw/pitch 偏置（45 字节；OFF 为 43 字节）")

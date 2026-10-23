@@ -16,5 +16,7 @@ set(BUILD_DEBUG           ON  CACHE BOOL "调试可视化（rerun，需预先安
 set(BUILD_TESTS           ON  CACHE BOOL "测试程序与调试工具")
 set(BUILD_CALIBRATION     ON  CACHE BOOL "标定程序")
 
+# 云台串口（与电控的约定，见 io/gimbal/protocol.hpp / types.hpp）
 # 哨兵的云台串口上多一条 nav 帧通道（底盘速度 + 比赛状态）
 set(GIMBAL_PROTOCOL       "sentry" CACHE STRING "云台串口协议")
+set(GIMBAL_HAS_OFFSET     ON  CACHE BOOL "反馈帧带 yaw/pitch 偏置（45 字节；OFF 为 43 字节）")
