@@ -48,10 +48,8 @@ int main(int argc, char * argv[])
   io::ROS2 ros2;
   io::CBoard cboard(config_path);
   io::Camera camera(config_path);
+  // 27 赛季全向感知只用一路后置 USB 相机（主相机是海康，归自瞄用）
   io::USBCamera usbcam1("video0", config_path);
-  io::USBCamera usbcam2("video2", config_path);
-  io::USBCamera usbcam3("video4", config_path);
-  io::USBCamera usbcam4("video6", config_path);
 
   auto_aim::YOLO yolo(config_path, false);
   auto_aim::Solver solver(config_path);
@@ -60,7 +58,7 @@ int main(int argc, char * argv[])
   auto_aim::Shooter shooter(config_path);
 
   omniperception::Decider decider(config_path);
-  omniperception::Perceptron perceptron(&usbcam1, &usbcam2, &usbcam3, &usbcam4, config_path);
+  omniperception::Perceptron perceptron(&usbcam1, config_path);
 
   omniperception::DetectionResult switch_target;
   cv::Mat img;
