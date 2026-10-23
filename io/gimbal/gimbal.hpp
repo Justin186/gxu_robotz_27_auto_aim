@@ -16,6 +16,7 @@
 #include "io/gimbal/protocol.hpp"
 #include "io/gimbal/types.hpp"
 #include "serial/serial.h"
+#include "tools/crc.hpp"
 #include "tools/thread_safe_queue.hpp"
 
 namespace io
@@ -39,6 +40,9 @@ struct GimbalState
 //   - 读线程按协议声明的帧表（rx_frames）按帧头分派，所以同一条串口上可以有
 //     多种帧（哨兵就是「视觉帧 + 导航帧」两种）
 //   - 本类不关心字节长什么样，只做「找帧 → 校验 → 解析 → 存状态」
+//
+// 与电控的"约定差异"（CRC 字节序等）由配置决定，集中在构造函数里读取并打印，
+// 不散落到业务代码。校验配错时会打一条日志告诉你该改成什么。
 //
 // 导航通道（nav_state / send_nav）只有在协议声明 has_nav 时才可用：
 // 用标准协议的兵种去调用会直接编译报错，而不是静默无效。
@@ -78,9 +82,12 @@ public:
   void send_nav(const NavCommand & cmd)
   {
     uint8_t frame[P::max_frame_size];
-    P::tx_encode_nav(cmd, frame);
+    P::tx_encode_nav(cmd, frame, crc_order_);
     write_frame(frame, P::tx_nav_frame_size);
   }
+
+  // 当前使用的 CRC 字节序（诊断日志用）
+  tools::CrcByteOrder crc_byte_order() const { return crc_order_; }
 
 protected:
   // 放在 protected：将来若有子类也要往同一个串口写帧，必须共用同一把锁
@@ -95,6 +102,12 @@ private:
   GimbalMode mode_ = GimbalMode::IDLE;
   GimbalState state_;
   NavFeedback nav_state_;
+
+  // 不同电控的 CRC 字节序可能不一样，由 config 里的 crc_byte_order 指定
+  tools::CrcByteOrder crc_order_ = tools::CrcByteOrder::Little;
+  // "字节序配错了"的提示只打一次，避免刷屏
+  std::atomic<bool> crc_hint_printed_{false};
+
   tools::ThreadSafeQueue<std::tuple<Eigen::Quaterniond, std::chrono::steady_clock::time_point>>
     queue_{1000};
 

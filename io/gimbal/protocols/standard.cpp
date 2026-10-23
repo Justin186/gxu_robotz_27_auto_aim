@@ -6,9 +6,10 @@
 
 namespace io
 {
-bool StandardProtocol::rx_check(const RxFrameSpec & spec, const uint8_t * frame)
+bool StandardProtocol::rx_check(
+  const RxFrameSpec & spec, const uint8_t * frame, tools::CrcByteOrder order)
 {
-  return tools::check_crc16(frame, spec.size);
+  return tools::check_crc16(frame, spec.size, order);
 }
 
 void StandardProtocol::rx_decode(const RxFrameSpec & spec, const uint8_t * frame, RxOut & out)
@@ -52,7 +53,8 @@ void StandardProtocol::rx_decode(const RxFrameSpec & spec, const uint8_t * frame
   }
 }
 
-void StandardProtocol::tx_encode(const GimbalCommand & cmd, uint8_t * frame)
+void StandardProtocol::tx_encode(
+  const GimbalCommand & cmd, uint8_t * frame, tools::CrcByteOrder order)
 {
   TxFrame f{};
   f.mode = cmd.control ? (cmd.fire ? 2 : 1) : 0;
@@ -62,7 +64,8 @@ void StandardProtocol::tx_encode(const GimbalCommand & cmd, uint8_t * frame)
   f.pitch = cmd.pitch;
   f.pitch_vel = cmd.pitch_vel;
   f.pitch_acc = cmd.pitch_acc;
-  f.crc16 = tools::get_crc16(reinterpret_cast<uint8_t *>(&f), sizeof(f) - sizeof(f.crc16));
+
+  tools::put_crc16(reinterpret_cast<uint8_t *>(&f), sizeof(f) - sizeof(f.crc16), order);
 
   std::memcpy(frame, &f, sizeof(f));
 }

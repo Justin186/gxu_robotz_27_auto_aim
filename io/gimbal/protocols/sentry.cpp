@@ -6,9 +6,10 @@
 
 namespace io
 {
-bool SentryProtocol::rx_check(const RxFrameSpec & spec, const uint8_t * frame)
+bool SentryProtocol::rx_check(
+  const RxFrameSpec & spec, const uint8_t * frame, tools::CrcByteOrder order)
 {
-  return tools::check_crc16(frame, spec.size);
+  return tools::check_crc16(frame, spec.size, order);
 }
 
 void SentryProtocol::rx_decode(const RxFrameSpec & spec, const uint8_t * frame, RxOut & out)
@@ -37,12 +38,14 @@ void SentryProtocol::rx_decode(const RxFrameSpec & spec, const uint8_t * frame, 
   nf.pos_y = f.pos_y;
 }
 
-void SentryProtocol::tx_encode(const GimbalCommand & cmd, uint8_t * frame)
+void SentryProtocol::tx_encode(
+  const GimbalCommand & cmd, uint8_t * frame, tools::CrcByteOrder order)
 {
-  StandardProtocol::tx_encode(cmd, frame);
+  StandardProtocol::tx_encode(cmd, frame, order);
 }
 
-void SentryProtocol::tx_encode_nav(const NavCommand & cmd, uint8_t * frame)
+void SentryProtocol::tx_encode_nav(
+  const NavCommand & cmd, uint8_t * frame, tools::CrcByteOrder order)
 {
   NavTx f{};
   f.linear_x = cmd.linear_x;
@@ -52,7 +55,8 @@ void SentryProtocol::tx_encode_nav(const NavCommand & cmd, uint8_t * frame)
   f.angular_y = cmd.angular_y;
   f.angular_z = cmd.angular_z;
   f.move_mode = cmd.move_mode;
-  f.crc16 = tools::get_crc16(reinterpret_cast<uint8_t *>(&f), sizeof(f) - sizeof(f.crc16));
+
+  tools::put_crc16(reinterpret_cast<uint8_t *>(&f), sizeof(f) - sizeof(f.crc16), order);
 
   std::memcpy(frame, &f, sizeof(f));
 }

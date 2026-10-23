@@ -7,6 +7,7 @@
 #include "io/gimbal/frame.hpp"
 #include "io/gimbal/protocols/standard.hpp"
 #include "io/gimbal/types.hpp"
+#include "tools/crc.hpp"
 
 namespace io
 {
@@ -74,14 +75,16 @@ struct SentryProtocol
   };
   static constexpr size_t rx_frame_count = 2;
 
-  static bool rx_check(const RxFrameSpec & spec, const uint8_t * frame);
+  static bool rx_check(
+    const RxFrameSpec & spec, const uint8_t * frame, tools::CrcByteOrder order);
   static void rx_decode(const RxFrameSpec & spec, const uint8_t * frame, RxOut & out);
 
   static constexpr size_t tx_frame_size = sizeof(VisionTx);
-  static void tx_encode(const GimbalCommand & cmd, uint8_t * frame);
+  static void tx_encode(const GimbalCommand & cmd, uint8_t * frame, tools::CrcByteOrder order);
 
   static constexpr size_t tx_nav_frame_size = sizeof(NavTx);
-  static void tx_encode_nav(const NavCommand & cmd, uint8_t * frame);
+  static void tx_encode_nav(
+    const NavCommand & cmd, uint8_t * frame, tools::CrcByteOrder order);
 };
 
 }  // namespace io

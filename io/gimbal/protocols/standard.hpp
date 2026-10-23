@@ -6,6 +6,7 @@
 
 #include "io/gimbal/frame.hpp"
 #include "io/gimbal/types.hpp"
+#include "tools/crc.hpp"
 
 namespace io
 {
@@ -75,12 +76,14 @@ struct StandardProtocol
   };
   static constexpr size_t rx_frame_count = 1;
 
-  static bool rx_check(const RxFrameSpec & spec, const uint8_t * frame);
+  // order 由 io::Gimbal 从配置里读出来（不同电控的 CRC 字节序可能不一样）
+  static bool rx_check(
+    const RxFrameSpec & spec, const uint8_t * frame, tools::CrcByteOrder order);
   static void rx_decode(const RxFrameSpec & spec, const uint8_t * frame, RxOut & out);
 
   // ---- 下行 ----
   static constexpr size_t tx_frame_size = sizeof(TxFrame);
-  static void tx_encode(const GimbalCommand & cmd, uint8_t * frame);
+  static void tx_encode(const GimbalCommand & cmd, uint8_t * frame, tools::CrcByteOrder order);
 };
 
 }  // namespace io

@@ -6,10 +6,34 @@
 
 namespace io
 {
+namespace
+{
+const char * order_name(tools::CrcByteOrder order)
+{
+  return order == tools::CrcByteOrder::Big ? "big" : "little";
+}
+}  // namespace
+
 Gimbal::Gimbal(const std::string & config_path)
 {
   auto yaml = tools::load(config_path);
   auto com_port = tools::read<std::string>(yaml, "com_port");
+
+  // ---- 与电控的约定差异：集中在这里显式读取，不再散到业务代码里 ----
+  // 不同电控把 CRC 写进帧尾两字节的顺序不一样：
+  //   little —— 把 CRC 塞进 packed 结构体再整体发送（x86 / ARM 的自然结果）
+  //   big    —— 逐字节按高字节优先拼帧
+  auto crc_order_str = tools::read<std::string>(yaml, "crc_byte_order", "little");
+  if (crc_order_str == "big" || crc_order_str == "Big") {
+    crc_order_ = tools::CrcByteOrder::Big;
+  } else if (crc_order_str == "little" || crc_order_str == "Little") {
+    crc_order_ = tools::CrcByteOrder::Little;
+  } else {
+    tools::logger()->warn(
+      "[Gimbal] 无法识别的 crc_byte_order '{}'，按 little 处理（可选 little / big）",
+      crc_order_str);
+    crc_order_ = tools::CrcByteOrder::Little;
+  }
 
   try {
     serial_.setPort(com_port);
@@ -22,7 +46,9 @@ Gimbal::Gimbal(const std::string & config_path)
   thread_ = std::thread(&Gimbal::read_thread, this);
 
   queue_.pop();
-  tools::logger()->info("[Gimbal] First q received. (protocol: {})", GimbalProtocol::name());
+  tools::logger()->info(
+    "[Gimbal] First q received. (protocol: {}, crc_byte_order: {})", GimbalProtocol::name(),
+    order_name(crc_order_));
 }
 
 Gimbal::~Gimbal()
@@ -79,7 +105,7 @@ Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t)
 void Gimbal::send(const GimbalCommand & cmd)
 {
   uint8_t frame[GimbalProtocol::max_frame_size];
-  GimbalProtocol::tx_encode(cmd, frame);
+  GimbalProtocol::tx_encode(cmd, frame, crc_order_);
   write_frame(frame, GimbalProtocol::tx_frame_size);
 }
 
@@ -121,8 +147,8 @@ void Gimbal::write_frame(const uint8_t * frame, size_t size)
 void Gimbal::read_thread()
 {
   tools::logger()->info(
-    "[Gimbal] read_thread started. (protocol: {}, {} 种上行帧)", GimbalProtocol::name(),
-    GimbalProtocol::rx_frame_count);
+    "[Gimbal] read_thread started. (protocol: {}, {} 种上行帧, crc_byte_order: {})",
+    GimbalProtocol::name(), GimbalProtocol::rx_frame_count, order_name(crc_order_));
 
   int error_count = 0;
 
@@ -166,8 +192,20 @@ void Gimbal::read_thread()
       continue;
     }
 
-    if (!GimbalProtocol::rx_check(*spec, frame)) {
-      tools::logger()->debug("[Gimbal] CRC16 check failed (kind {}).", static_cast<int>(spec->kind));
+    if (!GimbalProtocol::rx_check(*spec, frame, crc_order_)) {
+      // 用另一种字节序再试一次：命中就说明电控的约定和我们配的不一样。
+      // 只打日志提示，绝不采信 —— 免得把真·校验失败也放过去。
+      const auto other =
+        crc_order_ == tools::CrcByteOrder::Big ? tools::CrcByteOrder::Little : tools::CrcByteOrder::Big;
+      if (GimbalProtocol::rx_check(*spec, frame, other) && !crc_hint_printed_.exchange(true)) {
+        tools::logger()->warn(
+          "[Gimbal] CRC 按 {} 校验失败、按 {} 通过 —— 这块电控的 CRC 字节序很可能是 {}。"
+          "请把配置里的 crc_byte_order 改成 \"{}\"（改完需要重新上电，不需要重新编译）",
+          order_name(crc_order_), order_name(other), order_name(other), order_name(other));
+      } else if (!crc_hint_printed_.load()) {
+        tools::logger()->debug(
+          "[Gimbal] CRC16 check failed (kind {}).", static_cast<int>(spec->kind));
+      }
       continue;
     }
 

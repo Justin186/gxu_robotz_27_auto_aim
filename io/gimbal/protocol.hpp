@@ -24,14 +24,17 @@
 //        static constexpr size_t max_frame_size;   // 一帧最多多少字节
 //        static constexpr RxFrameSpec rx_frames[]; // 上行帧表（帧头 + 帧长 + 类别）
 //        static constexpr size_t rx_frame_count;
-//        static bool rx_check(const RxFrameSpec &, const uint8_t * frame);
+//        static bool rx_check(const RxFrameSpec &, const uint8_t * frame, tools::CrcByteOrder);
 //        static void rx_decode(const RxFrameSpec &, const uint8_t * frame, RxOut & out);
 //        static constexpr size_t tx_frame_size;
-//        static void tx_encode(const GimbalCommand & cmd, uint8_t * frame);
+//        static void tx_encode(const GimbalCommand & cmd, uint8_t * f, tools::CrcByteOrder);
 //
 //     如果 has_nav 是 true，还要额外提供：
 //        static constexpr size_t tx_nav_frame_size;
-//        static void tx_encode_nav(const NavCommand & cmd, uint8_t * frame);
+//        static void tx_encode_nav(const NavCommand & cmd, uint8_t * f, tools::CrcByteOrder);
+//
+//     CRC 的字节序由 io::Gimbal 从配置里读出来传进来（不同电控可能不一样），
+//     协议实现不要自己写死。
 //
 //   3. 在下面加一个分支，并在顶层 CMakeLists 的 GIMBAL_PROTOCOL 取值列表里加一项
 // ============================================================================
