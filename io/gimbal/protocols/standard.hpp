@@ -35,11 +35,6 @@ struct StandardProtocol
   // 只有视觉帧，没有导航通道
   static constexpr bool has_nav = false;
 
-  // 电控是否在反馈帧里带 yaw/pitch 稳态补偿偏置（可选特性，默认开启）。
-  // 关掉的话 RxFrame 里就没有这两个字段，GimbalState 的偏置恒为 0，
-  // 上层也就拿不到补偿量 —— 换电控协议时按需关。
-  static constexpr bool has_gimbal_offset = true;
-
   struct __attribute__((packed)) RxFrame
   {
     uint8_t head[2] = {'S', 'P'};

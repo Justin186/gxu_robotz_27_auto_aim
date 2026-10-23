@@ -39,6 +39,9 @@ Gimbal::Gimbal(const std::string & config_path)
   // pitch 的正负：有的电控把抬头当负方向，用 -1 翻过来
   pitch_sign_ = tools::read<int>(yaml, "pitch_sign", 1) < 0 ? -1.0f : 1.0f;
 
+  // 反馈帧里的稳态补偿偏置要不要用（电控不带这个信息时关掉）
+  use_gimbal_offset_ = tools::read<bool>(yaml, "use_gimbal_offset", true);
+
   try {
     serial_.setPort(com_port);
     serial_.open();
@@ -51,8 +54,8 @@ Gimbal::Gimbal(const std::string & config_path)
   // 免得电控没上电时看不到任何信息
   tools::logger()->info(
     "[Gimbal] 协议={}, crc_byte_order={}, pitch_sign={}, 偏置={}, 导航通道={}", GimbalProtocol::name(),
-    order_name(crc_order_), pitch_sign_ > 0 ? 1 : -1,
-    GimbalProtocol::has_gimbal_offset ? "带" : "不带", GimbalProtocol::has_nav ? "有" : "无");
+    order_name(crc_order_), pitch_sign_ > 0 ? 1 : -1, use_gimbal_offset_ ? "用" : "不用",
+    GimbalProtocol::has_nav ? "有" : "无");
 
   thread_ = std::thread(&Gimbal::read_thread, this);
 
@@ -234,6 +237,12 @@ void Gimbal::read_thread()
       // 这块电控的实际符号约定 → 内部约定（抬头为正）
       fb.pitch *= pitch_sign_;
       fb.pitch_vel *= pitch_sign_;
+
+      // 不用偏置时归零，上层拿到的就是 0，自然不做稳态补偿
+      if (!use_gimbal_offset_) {
+        fb.yaw_offset = 0;
+        fb.pitch_offset = 0;
+      }
 
       queue_.push({fb.q, t});
 
