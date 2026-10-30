@@ -12,6 +12,7 @@
 #include "detection.hpp"
 #include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/armor.hpp"
+#include "tasks/auto_aim/yolo.hpp"
 #include "tools/thread_safe_queue.hpp"
 
 namespace omniperception
