@@ -31,11 +31,83 @@ sudo apt install -y git g++ cmake libopencv-dev libfmt-dev libeigen3-dev \
 
 | 开关 | 额外依赖 |
 |---|---|
-| `BUILD_DEBUG=ON` | rerun_sdk（**系统安装**，CMake 用 `find_package` 找；不要用 FetchContent，校园网连不上 GitHub） |
+| `BUILD_DEBUG=ON` | rerun_sdk（**系统安装**，CMake 用 `find_package` 找，装法见下） |
 | `BUILD_NAV=ON` | ROS2 humble + `sp_msgs`（构建方式见下） |
 | `BUILD_AUTO_BUFF=ON` | [Ceres](http://ceres-solver.org/installation.html) |
 
 > ⚠️ 目前 5 个预设**默认都开了 `BUILD_DEBUG`**，所以都需要先装好 rerun_sdk。
+
+### rerun C++ SDK 安装（`BUILD_DEBUG=ON` 需要）
+
+官方的接入方式是 `FetchContent` 直接拉 GitHub，校园网下不来，所以这里**手工装进系统**，
+CMake 侧仍然只是一句 `find_package(rerun_sdk REQUIRED)`，不用改任何构建脚本。
+
+当前用的版本：**rerun_cpp_sdk 0.41.0**，它强依赖 **Arrow 18.0.0** —— Arrow 的版本号是
+SDK 里写死的，不是我们自己挑的，换成别的版本 `find_package` 过不去。
+
+GitHub 直连不通，下面统一走 `gh-proxy.com` 代理（`ghfast.top` 也可以；`mirror.ghproxy.com`
+实测不通）。先下两个包：
+
+```bash
+mkdir -p ~/sdk && cd ~/sdk
+
+# SDK 本体（约 60MB）
+curl -L -o rerun_cpp_sdk.zip \
+  "https://gh-proxy.com/https://github.com/rerun-io/rerun/releases/download/0.41.0/rerun_cpp_sdk.zip"
+unzip -q rerun_cpp_sdk.zip
+
+# Arrow 源码（约 100MB；SDK 的构建脚本默认要去 GitHub 下来自己编，这里提前下好直接喂给它）
+curl -L -o apache-arrow-18.0.0.tar.gz \
+  "https://gh-proxy.com/https://github.com/apache/arrow/releases/download/apache-arrow-18.0.0/apache-arrow-18.0.0.tar.gz"
+```
+
+编译安装 SDK（`RERUN_ARROW_URL` 指本地包，绕开下载）：
+
+```bash
+cmake -S ~/sdk/rerun_cpp_sdk -B ~/sdk/build-rerun \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      -DRERUN_ARROW_URL=$HOME/sdk/apache-arrow-18.0.0.tar.gz
+cmake --build ~/sdk/build-rerun -j$(nproc)   # 头一次会顺带编 Arrow，10~30 分钟
+sudo cmake --install ~/sdk/build-rerun
+```
+
+装到 `/usr/local` 是因为那是 CMake 的默认搜索前缀，装完 `find_package(rerun_sdk)` 直接命中，
+不用设 `CMAKE_PREFIX_PATH`、也不用往 `CMakePresets.json` 里写路径。
+
+> 机器上已经有 libarrow 18.0.0 的话（比如之前编过），可以省掉 Arrow 那趟编译：
+> 把上面 configure 那行换成
+> `-DRERUN_DOWNLOAD_AND_BUILD_ARROW=OFF -DCMAKE_PREFIX_PATH=<libarrow 安装前缀>`。
+> 这时 Arrow 不随 SDK 装，`/usr/local` 里也要有它的 cmake 配置，否则下游
+> `find_package` 会卡在 `find_dependency(Arrow)`。
+
+装完的效果（`find_package` 用到的就这几样）：
+
+```
+/usr/local/include/rerun.hpp
+/usr/local/include/rerun/
+/usr/local/lib/librerun_sdk.a
+/usr/local/lib/librerun_c__linux_x64.a
+/usr/local/lib/cmake/rerun_sdk/
+```
+
+Arrow 的部分看走哪条路：
+
+| 方案 | Arrow 装在哪 | 下游要不要额外找 Arrow |
+|---|---|---|
+| SDK 顺带编（`RERUN_ARROW_URL` / 默认） | `/usr/local/lib/libarrow.a`、`libarrow_bundled_dependencies.a` | 不要，SDK 的 cmake 配置自己带上了 |
+| 用系统已有的（`...=OFF`） | 还要 `include/arrow/`、`lib/cmake/Arrow/` | 要，配置里有一句 `find_dependency(Arrow)` |
+
+验证（任意空目录，不带任何 `-D`）：
+
+```bash
+mkdir -p /tmp/fp && cd /tmp/fp
+printf 'cmake_minimum_required(VERSION 3.16)\nproject(t CXX)\nfind_package(rerun_sdk REQUIRED)\n' > CMakeLists.txt
+cmake -S . -B b     # 只要不报 "Could not find a package configuration file" 就算装好了
+```
+
+> viewer **不在车上装**。`BUILD_DEBUG` 的程序默认不连 viewer，是运行时用 `--rerun --ip`
+> 连开发机上开着的那个，见"运行"一节。
 
 ## 编译
 
@@ -50,9 +122,12 @@ cmake --build --preset infantry -j$(nproc)
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
 | `hero`（重装 22mm） | ✓ | | | | | ✓ | ✓ | ✓ | standard |
 | `infantry`（步兵 42mm，轮腿/狗洞共用） | ✓ | | | | | ✓ | ✓ | ✓ | standard |
-| `sentry`（哨兵 42mm） | ✓ | ✓ | ✓ | ✓ | | ✓ | ✓ | ✓ | sentry |
+| `sentry`（哨兵 42mm） | ✓ | ✓ | ✓ | | | ✓ | ✓ | ✓ | sentry |
 | `sim`（仿真） | ✓ | | | | ✓ | ✓ | | | standard |
 | `dev`（开发机） | ✓ | | | | | ✓ | ✓ | | standard |
+
+> `sentry` 的 `BUILD_NAV` 目前是**关的**（开发机上没装 ROS2）。真要编 `sentry` 程序时，
+> 把 `cmake/presets/sentry.cmake` 里那行改回 `ON`，并先 `source /opt/ros/humble/setup.bash`。
 
 两个步兵的差异只在 `configs/infantry3.yaml` / `configs/infantry4.yaml`（按车号），
 构建配置完全一致。
@@ -70,8 +145,15 @@ cmake --build build -j$(nproc)
 
 命令行 `-D<开关>=ON/OFF` 优先于预设。
 
-> 例外：同一条命令里**又换了兵种**时，切换过程会重置预设管理的开关（configure 时
-> 会打印提示），`-D` 会被一起清掉。做法是**先切兵种，再补 `-D`**。
+> 例外：下面两种情况会重置预设管理的开关（configure 时会打印提示），同一批 `-D`
+> 也会被一起清掉，做法都是**重置之后再补 `-D`**：
+>
+> 1. 同一个 build 目录里**换了兵种**（`-DROBOT` 从 A 改成 B）；
+> 2. **改了 `cmake/presets/<兵种>.cmake`**。
+>
+> 除此之外 `-D` 会一直粘在 `build/CMakeCache.txt` 里。第 2 条是专门加的：CMake 的
+> `set(X ... CACHE ...)` 遇到已存在的 cache 项会静默跳过，不处理的话改预设永远不生效；
+> 现在每次 configure 都比对预设文件的内容哈希，变了就把旧值清掉重新写。
 
 | 开关 | 默认 | 作用 |
 |---|:-:|---|
@@ -121,6 +203,19 @@ colcon build --packages-select sp_msgs --base-paths sp_msgs \
 ```
 
 例如 `./build/sentry configs/sentry.yaml`。
+
+### 调试可视化（rerun）
+
+`BUILD_DEBUG=ON` 编出来的程序（`auto_aim_debug_mpc` / `auto_aim_debug_offline`）默认**不连 viewer**，
+要用 `--rerun` 显式打开，`--ip` 填跑 viewer 那台机器：
+
+```bash
+./build/auto_aim_debug_mpc configs/infantry3.yaml --rerun --ip 192.168.1.18
+```
+
+程序内部走 `rerun+http://<ip>:9876/proxy`，所以开发机上的 viewer 要在这个端口上监听
+（`rerun` 起来默认就是 9876）。viewer 只在开发机装：`pip install rerun-sdk`，或从
+[rerun.io](https://rerun.io) 下安装包。
 
 > 仓库里同时留着 26 赛季的多套入口，具体哪个程序对应哪个兵种以实际在用的为准：
 >
