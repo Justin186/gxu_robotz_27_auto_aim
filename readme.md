@@ -54,7 +54,8 @@ cmake --build --preset infantry -j$(nproc)
 | `sim`（仿真） | ✓ | | | | ✓ | ✓ | | | standard |
 | `dev`（开发机） | ✓ | | | | | ✓ | ✓ | | standard |
 
-两个步兵的差异只在 `configs/` 里的 yaml，构建配置完全一致。
+两个步兵的差异只在 `configs/infantry3.yaml` / `configs/infantry4.yaml`（按车号），
+构建配置完全一致。
 
 新增兵种：往 `cmake/presets/` 丢一个 `<名字>.cmake` 即可，顶层会自动发现，`-DROBOT=<名字>` 立刻可用。
 
@@ -126,16 +127,30 @@ colcon build --packages-select sp_msgs --base-paths sp_msgs \
 > - 走 `io::Gimbal`（串口）的：`*_mpc` 系列、`sentry` —— 27 赛季的方向
 > - 走 `io::CBoard`（CAN）的：`standard` / `mt_standard` / `uav*` / `auto_buff_debug` —— 同济开源遗留，27 赛季不用
 
+### 哨兵（`sentry`）的结构
+
+```
+主线程（相机帧率）      主海康 → yolo → tracker → 目标队列
+Perceptron（内部线程）  后置 USB → yolo → 检测队列
+控制线程（100Hz）       规划云台指令 → gimbal.send
+导航线程（10Hz）        ROS2 cmd_vel / 姿态 ⇄ 串口 nav 帧
+```
+
+- 主相机丢目标后先原地保持 25 帧，再用后置相机找；仍找不到就匀速扫掠
+- 导航超过 300ms 没给新指令就发零停车
+- 扫描/选靶都在控制线程里，`io::Gimbal` 只负责收发，不掺决策
+
 ## 配置说明
 
 每个兵种一份 `configs/<兵种>.yaml`，共用参数不多所以没有 common 层。
 
-与**电控约定**相关的几项（不同兵种的电控实现可能不同，改这里不用改代码）：
+与**电控约定**相关的几项。`com_port` 必填；另外两个是**可选键，需要时才自己加进
+yaml**，不写就用默认值（`little` / `1`）：
 
 ```yaml
-com_port: "/dev/ttyACM0"   # 云台串口设备
-crc_byte_order: little     # 帧尾 CRC 两字节的字节序：little / big
-pitch_sign: 1              # 电控把 pitch 正负搞反了就写 -1（收发两个方向都会翻）
+com_port: "/dev/ttyACM0"   # 必填：云台串口设备
+crc_byte_order: little     # 可选：帧尾 CRC 两字节的字节序，little / big
+pitch_sign: 1              # 可选：电控把 pitch 正负搞反了就写 -1（收发两个方向都会翻）
 ```
 
 - **CRC 字节序配错**时 `io::Gimbal` 会自动用另一种顺序再试一次，命中就打 warn 告诉你该改成什么，不用猜也不用重编译
@@ -149,8 +164,12 @@ pitch_sign: 1              # 电控把 pitch 正负搞反了就写 -1（收发�
 
 ## 当前状态
 
-- 哨兵主程序（`src/sentry.cpp`）正在按 27 方案重写：`io::Gimbal` + 主海康 + 1 路后置 USB + 规划线程 + nav 通道
-- `src/standard.cpp`、`src/mt_standard.cpp`、`src/uav*.cpp`、`src/auto_buff_debug.cpp` 等仍走 `io::CBoard`（CAN），是同济开源遗留、27 赛季不用的程序
+- 哨兵主程序（`src/sentry.cpp`）已按 27 方案重写完成，但**目前只验证了编译，尚未上机**
+- 哨兵的 nav 帧（`NavToGimbal` / `GimbalToNav`）沿用 26 赛季的布局，
+  **27 电控是重写的，这两帧的字段和帧头要和电控重新对一遍**，否则 nav 通道一帧都不通
+- 调试可视化版本等主程序上机跑通后再加
+- `src/standard.cpp`、`src/mt_standard.cpp`、`src/uav*.cpp`、`src/auto_buff_debug.cpp` 等
+  仍走 `io::CBoard`（CAN），是同济开源遗留、27 赛季不用的程序
 - `pitch_sign` 各兵种的实际取值需要上机确认后再写进对应 yaml
 
 ## 其它
@@ -163,13 +182,14 @@ mkdir -p ~/.config/autostart
 cat > ~/.config/autostart/sp_vision.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
-Exec=/home/rm/Desktop/gxu_robotz_27_auto_aim/autostart.sh
+Exec=/home/rm/Desktop/gxu_robotz_27_auto_aim/autostart.sh configs/infantry3.yaml
 Name=sp_vision
 EOF
 chmod +x autostart.sh
 ```
 
-`Exec` 必须是绝对路径。
+`Exec` 必须是绝对路径。**配置路径要作为参数传进来** —— "这台机器跑哪份配置"写在
+各自的桌面项里，仓库中的 `autostart.sh` 谁都不用改，也就不会 pull 冲突。
 </details>
 
 <details>
