@@ -192,7 +192,20 @@ colcon build --packages-select sp_msgs --base-paths sp_msgs \
              --install-base sp_msgs_install --build-base sp_msgs_build
 ```
 
-没构建的话 CMake 会直接失败并打印上面这条命令。
+然后加载本仓库生成的消息环境：
+
+```bash
+source sp_msgs_install/setup.bash
+```
+
+不要让旧的外部 `sp_msgs` 工作空间覆盖本仓库的消息包。若之前配置过旧工作空间，
+建议删除哨兵构建目录后重新配置：
+
+```bash
+rm -rf build-sentry
+```
+
+没构建本仓库的 `sp_msgs` 时，CMake 会直接失败并打印上面这条命令。
 
 ## 运行
 
@@ -220,18 +233,20 @@ colcon build --packages-select sp_msgs --base-paths sp_msgs \
 > 仓库里同时留着 26 赛季的多套入口，具体哪个程序对应哪个兵种以实际在用的为准：
 >
 > - 走 `io::Gimbal`（串口）的：`*_mpc` 系列、`sentry` —— 27 赛季的方向
-> - 走 `io::CBoard`（CAN）的：`standard` / `mt_standard` / `uav*` / `auto_buff_debug` —— 同济开源遗留，27 赛季不用
+> - 走 `io::CBoard`（CAN）的：`standard` / `mt_standard` / `auto_buff_debug` —— 同济开源遗留，27 赛季不用
 
 ### 哨兵（`sentry`）的结构
 
 ```
 主线程（相机帧率）      主海康 → yolo → tracker → 目标队列
-Perceptron（内部线程）  后置 USB → yolo → 检测队列
+Perceptron（三路线程）  左/右/后 USB → 各自 yolo → 检测队列
 控制线程（100Hz）       规划云台指令 → gimbal.send
 导航线程（10Hz）        ROS2 cmd_vel / 姿态 ⇄ 串口 nav 帧
 ```
 
-- 主相机丢目标后先原地保持 25 帧，再用后置相机找；仍找不到就匀速扫掠
+- 主相机锁定目标时暂停三路侧向推理，降低 CPU 抢占；丢目标后恢复
+- USB 相机通过 V4L2 sharpness 识别方向：2=left、74=right、3=back
+- 主相机丢目标后先原地保持 25 帧，再用三路侧向相机找；仍找不到就匀速扫掠
 - 导航超过 300ms 没给新指令就发零停车
 - 扫描/选靶都在控制线程里，`io::Gimbal` 只负责收发，不掺决策
 
@@ -263,7 +278,7 @@ pitch_sign: 1              # 可选：电控把 pitch 正负搞反了就写 -1�
 - 哨兵的 nav 帧（`NavToGimbal` / `GimbalToNav`）沿用 26 赛季的布局，
   **27 电控是重写的，这两帧的字段和帧头要和电控重新对一遍**，否则 nav 通道一帧都不通
 - 调试可视化版本等主程序上机跑通后再加
-- `src/standard.cpp`、`src/mt_standard.cpp`、`src/uav*.cpp`、`src/auto_buff_debug.cpp` 等
+- `src/standard.cpp`、`src/mt_standard.cpp`、`src/auto_buff_debug.cpp` 等
   仍走 `io::CBoard`（CAN），是同济开源遗留、27 赛季不用的程序
 - `pitch_sign` 各兵种的实际取值需要上机确认后再写进对应 yaml
 

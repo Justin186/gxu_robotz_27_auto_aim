@@ -3,6 +3,9 @@
 
 #include <chrono>
 #include <list>
+#include <string>
+
+#include <opencv2/opencv.hpp>
 
 #include "tasks/auto_aim/armor.hpp"
 
@@ -15,6 +18,8 @@ struct DetectionResult
   std::chrono::steady_clock::time_point timestamp;
   double delta_yaw;    //rad
   double delta_pitch;  //rad
+  std::string camera_name;
+  cv::Mat img;
 
   // Assignment operator
   DetectionResult & operator=(const DetectionResult & other)
@@ -24,6 +29,8 @@ struct DetectionResult
       timestamp = other.timestamp;
       delta_yaw = other.delta_yaw;
       delta_pitch = other.delta_pitch;
+      camera_name = other.camera_name;
+      img = other.img;
     }
     return *this;
   }

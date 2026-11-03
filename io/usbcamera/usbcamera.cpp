@@ -90,6 +90,17 @@ void USBCamera::read(cv::Mat & img, std::chrono::steady_clock::time_point & time
   timestamp = data.timestamp;
 }
 
+bool USBCamera::try_read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp)
+{
+  if (queue_.empty()) return false;
+
+  CameraData data;
+  queue_.pop(data);
+  img = data.img;
+  timestamp = data.timestamp;
+  return true;
+}
+
 void USBCamera::open()
 {
   std::lock_guard<std::mutex> lock(cap_mutex_);
@@ -100,6 +111,7 @@ void USBCamera::open()
     return;
   }
   sharpness_ = cap_.get(cv::CAP_PROP_SHARPNESS);
+  tools::logger()->info("{} sharpness: {}", open_name_, sharpness_);
   cap_.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
   cap_.set(cv::CAP_PROP_FPS, usb_frame_rate_);
   cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 1);
@@ -111,8 +123,13 @@ void USBCamera::open()
     cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
     cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
     cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
-  } else if (sharpness_ == 3) {
+  } else if (sharpness_ == 74) {
     device_name = "right";
+    cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
+    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
+    cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
+  } else if (sharpness_ == 3) {
+    device_name = "back";
     cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
     cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
     cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
@@ -148,6 +165,7 @@ void USBCamera::open()
 
       auto timestamp = std::chrono::steady_clock::now();
       queue_.push({img, timestamp});
+      capture_count_++;
     }
     ok_ = false;
   }};

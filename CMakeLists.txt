@@ -171,7 +171,15 @@ if(BUILD_NAV)
 
   # ---- sp_msgs：本仓库的源码包，需要先用 colcon 构建（见 readme）----
   # 生成物不入库；构造一次即可，之后改 .msg 再重跑那条 colcon 命令。
-  list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/sp_msgs_install/sp_msgs")
+  set(_local_sp_msgs_dir
+      "${CMAKE_SOURCE_DIR}/sp_msgs_install/sp_msgs/share/sp_msgs/cmake")
+  if(EXISTS "${_local_sp_msgs_dir}/sp_msgsConfig.cmake")
+    # 优先使用本仓库的 ROS2 消息，避免被外部旧版 sp_msgs 工作空间抢先找到。
+    set(sp_msgs_DIR "${_local_sp_msgs_dir}" CACHE PATH "本仓库 sp_msgs 的 CMake 配置目录" FORCE)
+  else()
+    unset(sp_msgs_DIR CACHE)
+  endif()
+  list(PREPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/sp_msgs_install/sp_msgs")
   find_package(sp_msgs QUIET)
   if(NOT sp_msgs_FOUND)
     message(FATAL_ERROR
@@ -215,8 +223,6 @@ if(BUILD_AUTO_AIM)
   add_executable(auto_aim_mpc src/auto_aim_mpc.cpp)
   target_link_libraries(auto_aim_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
-  add_executable(uav_debug src/uav_debug.cpp)
-  target_link_libraries(uav_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 endif()
 
 # ---- 需要同时用到 自瞄 + 打符 的程序 ----
@@ -227,8 +233,6 @@ if(BUILD_AUTO_AIM AND BUILD_AUTO_BUFF)
   add_executable(standard_mpc src/standard_mpc.cpp)
   target_link_libraries(standard_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 
-  add_executable(uav src/uav.cpp)
-  target_link_libraries(uav ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 endif()
 
 # ---- 打符 ----

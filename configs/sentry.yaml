@@ -33,6 +33,10 @@ usb_exposure: 500 #1-80000______250
 usb_gamma: 160
 usb_gain: 10 #0-96
 
+# 左/右/后 USB 相机各自的 OpenVINO 推理线程数；0 表示使用默认 LATENCY 模式。
+# 哨兵全向感知是三路并行，限制每路线程数可避免侧向推理抢占主相机。
+side_infer_threads: 4
+
 #####-----工业相机参数-----#####
 camera_name: "hikrobot"
 exposure_ms: 5

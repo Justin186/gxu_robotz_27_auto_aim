@@ -10,7 +10,7 @@
 
 namespace auto_aim
 {
-YOLOV5::YOLOV5(const std::string & config_path, bool debug)
+YOLOV5::YOLOV5(const std::string & config_path, bool debug, int infer_threads)
 : debug_(debug), detector_(config_path, false)
 {
   auto yaml = YAML::LoadFile(config_path);
@@ -50,8 +50,12 @@ YOLOV5::YOLOV5(const std::string & config_path, bool debug)
 
   // TODO: ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)
   model = ppp.build();
-  compiled_model_ = core_.compile_model(
-    model, device_, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
+  if (infer_threads > 0)
+    compiled_model_ = core_.compile_model(
+      model, device_, ov::num_streams(1), ov::inference_num_threads(infer_threads));
+  else
+    compiled_model_ = core_.compile_model(
+      model, device_, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
 }
 
 std::list<Armor> YOLOV5::detect(const cv::Mat & raw_img, int frame_count)

@@ -89,9 +89,11 @@ int main(int argc, char * argv[])
   io::Gimbal gimbal(config_path);
   io::ROS2 ros2;
 
-  // ---- 相机：主海康用于自瞄，一路后置 USB 用于扫描找人 ----
+  // ---- 相机：主海康用于自瞄，左/右/后 USB 用于全向寻敌 ----
   io::Camera camera(config_path);
-  io::USBCamera back_camera("video0", config_path);
+  io::USBCamera left_camera("video0", config_path);
+  io::USBCamera right_camera("video2", config_path);
+  io::USBCamera back_camera("video4", config_path);
 
   // ---- 自瞄 ----
   auto_aim::YOLO yolo(config_path, false);
@@ -101,7 +103,8 @@ int main(int argc, char * argv[])
 
   // ---- 全向感知：后置相机由 Perceptron 自己在后台跑 ----
   omniperception::Decider decider(config_path);
-  omniperception::Perceptron perceptron(&back_camera, config_path);
+  omniperception::Perceptron perceptron(
+    &left_camera, &right_camera, &back_camera, config_path);
 
   // 主线程 → 控制线程。只保留最新一个目标，控制线程不追历史
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
@@ -138,7 +141,7 @@ int main(int argc, char * argv[])
           plan.pitch_vel, plan.pitch_acc);
 
       } else {
-        // 主相机没目标：用后置相机找人
+          // 主相机没目标：用左/右/后 USB 相机寻找目标
         auto cmd = decider.decide(perceptron.get_detection_queue());
 
         if (cmd.control) {
@@ -217,6 +220,7 @@ int main(int argc, char * argv[])
 
     auto armors = yolo.detect(img);
     auto targets = tracker.track(armors, t);
+    perceptron.set_pause(tracker.state() != "lost");
 
     if (!targets.empty())
       target_queue.push(targets.front());
