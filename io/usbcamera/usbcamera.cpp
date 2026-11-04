@@ -128,11 +128,6 @@ void USBCamera::open()
     cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
     cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
     cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
-  } else if (sharpness_ == 3) {
-    device_name = "back";
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
-    cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
   }
 
   tools::logger()->info("{} USBCamera opened", device_name);

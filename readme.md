@@ -9,7 +9,7 @@
 |---|---|
 | 操作系统 | Ubuntu 22.04 |
 | 运算平台 | NUC12WSKI7（i7-1260P / 16GB）；狗洞步兵为 Jetson Nano（aarch64） |
-| 相机 | 海康 MV-CS016-10UC + 官方 6mm 镜头；哨兵另有后置 USB 相机 |
+| 相机 | 海康 MV-CS016-10UC + 官方 6mm 镜头；哨兵另有左 / 右两路侧向 USB 相机 |
 | 下位机 | RoboMaster 开发板 C 型（STM32F407） |
 | 通信 | MicroUSB 虚拟串口（云台协议；哨兵同一个串口上还有导航帧） |
 
@@ -239,14 +239,14 @@ rm -rf build-sentry
 
 ```
 主线程（相机帧率）      主海康 → yolo → tracker → 目标队列
-Perceptron（三路线程）  左/右/后 USB → 各自 yolo → 检测队列
+Perceptron（两路线程）  左/右 USB → 各自 yolo → 检测队列
 控制线程（100Hz）       规划云台指令 → gimbal.send
 导航线程（10Hz）        ROS2 cmd_vel / 姿态 ⇄ 串口 nav 帧
 ```
 
-- 主相机锁定目标时暂停三路侧向推理，降低 CPU 抢占；丢目标后恢复
-- USB 相机通过 V4L2 sharpness 识别方向：2=left、74=right、3=back
-- 主相机丢目标后先原地保持 25 帧，再用三路侧向相机找；仍找不到就匀速扫掠
+- 主相机锁定目标时暂停两路侧向推理，降低 CPU 抢占；丢目标后恢复
+- USB 相机通过 V4L2 sharpness 识别方向：2=left、74=right
+- 主相机丢目标后先原地保持 25 帧，再用两路侧向相机找；仍找不到就匀速扫掠
 - 导航超过 300ms 没给新指令就发零停车
 - 扫描/选靶都在控制线程里，`io::Gimbal` 只负责收发，不掺决策
 

@@ -92,11 +92,11 @@ endif()
 # ============================================================================
 option(BUILD_AUTO_AIM       "自瞄核心"                            ON)
 option(BUILD_AUTO_BUFF      "打符"                                ON)
-option(BUILD_OMNIPERCEPTION "全向感知（哨兵）"                     OFF)
-option(BUILD_NAV            "ROS2 通信（哨兵导航 / ROS2 仿真桥）"    OFF)
+option(BUILD_OMNIPERCEPTION "全向感知（哨兵）"                     ON)
+option(BUILD_NAV            "ROS2 通信（哨兵导航 / ROS2 仿真桥）"    ON)
 option(BUILD_SIM            "仿真接口（共享内存 / 仿真 IMU）"        OFF)
 option(BUILD_DEBUG          "调试可视化（rerun，需预先安装 SDK）"    OFF)
-option(BUILD_TESTS          "测试程序与调试工具"                    OFF)
+option(BUILD_TESTS          "测试程序与调试工具"                    ON)
 option(BUILD_CALIBRATION    "标定程序"                             ON)
 
 # ---- 云台串口协议（编译期选择，见 io/gimbal/protocol.hpp）----

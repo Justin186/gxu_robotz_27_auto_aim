@@ -8,8 +8,7 @@
 namespace omniperception
 {
 Perceptron::Perceptron(
-  io::USBCamera * usbcam1, io::USBCamera * usbcam2, io::USBCamera * usbcam3,
-  const std::string & config_path)
+  io::USBCamera * usbcam1, io::USBCamera * usbcam2, const std::string & config_path)
 : detection_queue_(10), decider_(config_path)
 {
   auto yaml = YAML::LoadFile(config_path);
@@ -20,16 +19,12 @@ Perceptron::Perceptron(
     std::make_shared<auto_aim::YOLO>(config_path, false, side_infer_threads);
   yolo_parallel2_ =
     std::make_shared<auto_aim::YOLO>(config_path, false, side_infer_threads);
-  yolo_parallel3_ =
-    std::make_shared<auto_aim::YOLO>(config_path, false, side_infer_threads);
 
   std::this_thread::sleep_for(std::chrono::seconds(2));
   threads_.emplace_back(
     [this, usbcam1] { parallel_infer(usbcam1, yolo_parallel1_); });
   threads_.emplace_back(
     [this, usbcam2] { parallel_infer(usbcam2, yolo_parallel2_); });
-  threads_.emplace_back(
-    [this, usbcam3] { parallel_infer(usbcam3, yolo_parallel3_); });
 
   tools::logger()->info("Perceptron initialized.");
 }

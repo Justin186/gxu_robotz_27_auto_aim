@@ -29,7 +29,7 @@
 // 结构（三条线程 + 两条由库自己管的后台线程）：
 //
 //   主线程（相机帧率）        主海康 → yolo → tracker → target_queue
-//   Perceptron（库内线程）    后置 USB → yolo → detection_queue
+//   Perceptron（库内线程）    左/右 USB → yolo → detection_queue
 //   控制线程（100Hz）         规划出云台指令 → gimbal.send
 //   导航线程（10Hz）          ROS2 cmd_vel/姿态 ⇄ 串口 nav 帧
 //   Gimbal（库内线程）        串口收发（视觉帧 + nav 帧）
@@ -89,11 +89,10 @@ int main(int argc, char * argv[])
   io::Gimbal gimbal(config_path);
   io::ROS2 ros2;
 
-  // ---- 相机：主海康用于自瞄，左/右/后 USB 用于全向寻敌 ----
+  // ---- 相机：主海康用于自瞄，左/右 USB 用于侧向寻敌 ----
   io::Camera camera(config_path);
   io::USBCamera left_camera("video0", config_path);
   io::USBCamera right_camera("video2", config_path);
-  io::USBCamera back_camera("video4", config_path);
 
   // ---- 自瞄 ----
   auto_aim::YOLO yolo(config_path, false);
@@ -101,10 +100,9 @@ int main(int argc, char * argv[])
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Planner planner(config_path);
 
-  // ---- 全向感知：后置相机由 Perceptron 自己在后台跑 ----
+  // ---- 侧向感知：左/右 USB 相机由 Perceptron 自己在后台跑 ----
   omniperception::Decider decider(config_path);
-  omniperception::Perceptron perceptron(
-    &left_camera, &right_camera, &back_camera, config_path);
+  omniperception::Perceptron perceptron(&left_camera, &right_camera, config_path);
 
   // 主线程 → 控制线程。只保留最新一个目标，控制线程不追历史
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
@@ -141,11 +139,11 @@ int main(int argc, char * argv[])
           plan.pitch_vel, plan.pitch_acc);
 
       } else {
-          // 主相机没目标：用左/右/后 USB 相机寻找目标
+          // 主相机没目标：用左/右 USB 相机寻找目标
         auto cmd = decider.decide(perceptron.get_detection_queue());
 
         if (cmd.control) {
-          // 后置相机看到了 —— 转过去，等主相机接上
+          // 侧向相机看到了 —— 转过去，等主相机接上
           scanning = false;
           lost_frames = 0;
           scan_yaw = tools::limit_rad(gs.yaw + cmd.yaw);

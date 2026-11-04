@@ -23,9 +23,7 @@ namespace omniperception
 class Perceptron
 {
 public:
-  Perceptron(
-    io::USBCamera * usbcam1, io::USBCamera * usbcam2, io::USBCamera * usbcam3,
-    const std::string & config_path);
+  Perceptron(io::USBCamera * usbcam1, io::USBCamera * usbcam2, const std::string & config_path);
   ~Perceptron();
 
   std::vector<DetectionResult> get_detection_queue();
@@ -40,7 +38,6 @@ private:
   tools::ThreadSafeQueue<DetectionResult> detection_queue_;
   std::shared_ptr<auto_aim::YOLO> yolo_parallel1_;
   std::shared_ptr<auto_aim::YOLO> yolo_parallel2_;
-  std::shared_ptr<auto_aim::YOLO> yolo_parallel3_;
   Decider decider_;
   std::atomic<bool> stop_flag_{false};
   std::atomic<bool> pause_{false};

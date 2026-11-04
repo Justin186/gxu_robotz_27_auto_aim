@@ -31,9 +31,7 @@ Eigen::Vector2d Decider::delta_angle(
 {
   Eigen::Vector2d delta_angle;
 
-  // 27 赛季只有一路后置相机，所以实际走的是最后那个分支。
-  // left / right 是 26 赛季四路 USB 全向感知留下的，先保留（将来加侧向相机要用），
-  // 两条分支里的 ±62 是侧向相机的安装偏角。
+  // 侧向相机只有左 / 右两路（±62 是安装偏角），其余名字视为异常。
   if (camera == "left") {
     delta_angle[0] = 62 + (new_fov_h_ / 2) - armors.front().center_norm.x * new_fov_h_;
     delta_angle[1] = armors.front().center_norm.y * new_fov_v_ - new_fov_v_ / 2;
@@ -46,11 +44,8 @@ Eigen::Vector2d Decider::delta_angle(
     return delta_angle;
   }
 
-  // 后置相机：装在云台正后方（偏角 170°），54.2 / 44.5 是它的水平 / 垂直视场角。
-  // TODO: 这两个数应该从 yaml 读，现在写死是因为当初没和下位机对过实际视场。
-  delta_angle[0] = 170 + (54.2 / 2) - armors.front().center_norm.x * 54.2;
-  delta_angle[1] = armors.front().center_norm.y * 44.5 - 44.5 / 2;
-  return delta_angle;
+  tools::logger()->warn("Unknown side camera name '{}', returning zero delta angle.", camera);
+  return Eigen::Vector2d::Zero();
 }
 
 Eigen::Vector4d Decider::get_target_info(
