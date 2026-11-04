@@ -341,6 +341,17 @@ if(BUILD_TESTS)
     target_link_libraries(auto_buff_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
   endif()
 
+  # ---- 主相机 + 左右 USB 多线程推理联调（需要 auto_aim + omniperception）----
+  if(BUILD_AUTO_AIM AND BUILD_OMNIPERCEPTION)
+    add_executable(multithread_perception_test tests/multithread_perception_test.cpp)
+    target_link_libraries(multithread_perception_test
+      ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim omniperception)
+    if(BUILD_DEBUG)
+      target_link_libraries(multithread_perception_test rerun_sdk)
+      target_compile_definitions(multithread_perception_test PRIVATE USE_RERUN)
+    endif()
+  endif()
+
   # ---- 需要 ROS2 ----
   if(BUILD_NAV)
     foreach(tgt publish_test subscribe_test topic_loop_test)

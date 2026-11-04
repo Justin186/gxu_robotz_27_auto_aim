@@ -284,6 +284,38 @@ pitch_sign: 1              # 可选：电控把 pitch 正负搞反了就写 -1�
 
 ## 其它
 
+### Git 日常操作
+
+仓库地址：`git@github.com:Justin186/gxu_robotz_27_auto_aim.git`。开发机和上车小电脑都
+要各自配一把 SSH key（GitHub Settings → SSH keys → New SSH key）。
+
+```bash
+# 拉远程最新（开发机 / 小电脑都一样）
+git pull --rebase origin dev
+
+# 推本地 commit 到远程
+git push origin dev
+
+# 只 fetch 不合并（想看看远程有没有新 commit 时用）
+git fetch origin
+
+# 提交三步
+git add <文件>              # 暂存；git add . 慎用，会把 build/ 编译产物也加进去
+git commit -m "一句话描述"   # 本地提交
+git push origin dev         # 推远程
+
+# 遇到 "non-fast-forward" 拒绝推送 —— 远程有你本地没有的 commit
+git pull --rebase origin dev
+git push origin dev
+```
+
+远程仓库连不通时（上车小电脑直连 github.com 会被 reset），把 origin 临时改成代理：
+
+```bash
+git remote set-url origin https://ghfast.top/https://github.com/Justin186/gxu_robotz_27_auto_aim.git
+git pull --rebase origin dev
+```
+
 <details>
 <summary>注册自启</summary>
 
