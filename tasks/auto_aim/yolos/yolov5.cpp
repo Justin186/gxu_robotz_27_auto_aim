@@ -50,12 +50,34 @@ YOLOV5::YOLOV5(const std::string & config_path, bool debug, int infer_threads)
 
   // TODO: ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)
   model = ppp.build();
-  if (infer_threads > 0)
-    compiled_model_ = core_.compile_model(
-      model, device_, ov::num_streams(1), ov::inference_num_threads(infer_threads));
-  else
-    compiled_model_ = core_.compile_model(
-      model, device_, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
+
+  // 尝试用户指定的设备，失败时自动 fallback：指定 → AUTO → CPU。
+  auto try_compile = [&](const std::string & dev) {
+    try {
+      if (infer_threads > 0)
+        compiled_model_ = core_.compile_model(
+          model, dev, ov::num_streams(1), ov::inference_num_threads(infer_threads));
+      else
+        compiled_model_ = core_.compile_model(
+          model, dev, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
+      return true;
+    } catch (const ov::Exception & e) {
+      tools::logger()->warn("compile_model on device '{}' failed: {}", dev, e.what());
+      return false;
+    }
+  };
+
+  if (!try_compile(device_)) {
+    tools::logger()->warn("Falling back to AUTO for YOLOV5");
+    if (!try_compile("AUTO")) {
+      tools::logger()->warn("Falling back to CPU for YOLOV5");
+      if (!try_compile("CPU")) throw;
+      device_ = "CPU";
+    } else {
+      device_ = "AUTO";
+    }
+  }
+  tools::logger()->info("YOLOV5 compiled on device '{}'", device_);
 }
 
 std::list<Armor> YOLOV5::detect(const cv::Mat & raw_img, int frame_count)
