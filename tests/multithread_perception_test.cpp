@@ -21,6 +21,8 @@
 #include "io/camera.hpp"
 #include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/armor.hpp"
+#include "tasks/auto_aim/solver.hpp"
+#include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tasks/omniperception/perceptron.hpp"
 #include "tools/exiter.hpp"
@@ -112,16 +114,22 @@ int main(int argc, char * argv[])
   io::USBCamera right_camera(right_name, config_path);
 
   auto_aim::YOLO yolo(config_path, false);
+  auto_aim::Solver solver(config_path);
+  auto_aim::Tracker tracker(config_path, solver);
   omniperception::Perceptron perceptron(&left_camera, &right_camera, config_path);
 
   // ---- 统计状态 ----
   uint64_t main_frames = 0;
   double main_infer_ms_sum = 0;
-  double last_main_fps = 0, last_main_ms = 0, last_total_fps = 0;
+  double main_track_ms_sum = 0;
+  double last_main_fps = 0, last_main_ms = 0, last_main_track_ms = 0, last_total_fps = 0;
   size_t last_pending = 0;
   std::unordered_map<std::string, uint64_t> last_counts, last_caps;
   std::map<std::string, double> side_infer_fps, side_cap_fps, side_drop_pct;
   std::unordered_map<std::string, std::list<auto_aim::Armor>> last_side_armors;
+  // Perceptron 只在检测到装甲板时才推结果（perceptron.cpp 里 armors.empty() 会跳过），
+  // 所以显示用的框要按时间过期，否则目标离开后框会一直停在原处。
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point> last_side_armor_time;
 
   cv::Mat img;
   std::chrono::steady_clock::time_point t;
@@ -130,17 +138,27 @@ int main(int argc, char * argv[])
   while (!exiter.exit()) {
     camera.read(img, t);
 
+    // 测试程序没有 IMU / 云台反馈，用单位四元数：云台坐标系视为与世界坐标系对齐
+    solver.set_R_gimbal2world(Eigen::Quaterniond(1, 0, 0, 0));
+
     auto t0 = std::chrono::steady_clock::now();
     auto armors = yolo.detect(img);
     auto t1 = std::chrono::steady_clock::now();
+    auto targets = tracker.track(armors, t);
+    auto t2 = std::chrono::steady_clock::now();
 
     main_frames++;
     main_infer_ms_sum += std::chrono::duration<double, std::milli>(t1 - t0).count();
+    main_track_ms_sum += std::chrono::duration<double, std::milli>(t2 - t1).count();
 
     // 取空侧向检测队列，记录每路最新的装甲板（用于显示 / rerun）
+    auto det_frame_now = std::chrono::steady_clock::now();
     auto detections = perceptron.get_detection_queue();
     last_pending = detections.size();
-    for (const auto & d : detections) last_side_armors[d.camera_name] = d.armors;
+    for (const auto & d : detections) {
+      last_side_armors[d.camera_name] = d.armors;
+      last_side_armor_time[d.camera_name] = det_frame_now;
+    }
 
     // ---- 每秒统计一次 ----
     auto now = std::chrono::steady_clock::now();
@@ -148,6 +166,7 @@ int main(int argc, char * argv[])
     if (dt >= 1.0) {
       last_main_fps = main_frames / dt;
       last_main_ms = main_frames ? main_infer_ms_sum / main_frames : 0;
+      last_main_track_ms = main_frames ? main_track_ms_sum / main_frames : 0;
 
       std::unordered_map<std::string, uint64_t> caps{
         {left_camera.device_name, left_camera.capture_count()},
@@ -175,11 +194,13 @@ int main(int argc, char * argv[])
           side_drop_pct[name]);
       }
       tools::logger()->info(
-        "main {:.1f} fps ({:.1f} ms){} | queue {} | total infer {:.1f} fps", last_main_fps,
-        last_main_ms, side_stats, last_pending, last_total_fps);
+        "main {:.1f} fps (yolo {:.1f} ms track {:.1f} ms, {}){} | queue {} | total infer {:.1f} fps",
+        last_main_fps, last_main_ms, last_main_track_ms, tracker.state(), side_stats, last_pending,
+        last_total_fps);
 
       main_frames = 0;
       main_infer_ms_sum = 0;
+      main_track_ms_sum = 0;
       last_stats = now;
     }
 
@@ -189,9 +210,20 @@ int main(int argc, char * argv[])
 
       cv::Mat main_view = img.clone();
       draw_armors(main_view, armors);
+      // tracker 解算出的目标装甲板位置重投影（黄色），用于验证 solver 是否正确
+      for (const auto & target : targets) {
+        for (const auto & xyza : target.armor_xyza_list()) {
+          auto pts =
+            solver.reproject_armor(xyza.head(3), xyza[3], target.armor_type, target.name);
+          tools::draw_points(main_view, pts, {255, 255, 0});
+        }
+      }
       tools::draw_text(
-        main_view, fmt::format("main {:.1f}fps {:.1f}ms", last_main_fps, last_main_ms), {10, 30},
-        {255, 255, 255}, 0.8, 1);
+        main_view,
+        fmt::format(
+          "main {:.1f}fps yolo {:.1f}ms track {:.1f}ms [{}]", last_main_fps, last_main_ms,
+          last_main_track_ms, tracker.state()),
+        {10, 30}, {255, 255, 255}, 0.8, 1);
       named_views.emplace_back("main", main_view);
 
       auto frames = perceptron.get_latest_frames();
@@ -201,8 +233,17 @@ int main(int argc, char * argv[])
       for (const auto & name : names) {
         cv::Mat view = frames[name].clone();
         if (view.empty()) continue;
+        // 超过 300ms 没有新的侧向检测就撤掉框，避免目标离开后框留在原处
         auto it = last_side_armors.find(name);
-        if (it != last_side_armors.end()) draw_armors(view, it->second);
+        if (it != last_side_armors.end()) {
+          double armor_age =
+            std::chrono::duration<double>(det_frame_now - last_side_armor_time[name]).count();
+          if (armor_age < 0.3) {
+            draw_armors(view, it->second);
+          } else {
+            last_side_armors.erase(it);
+          }
+        }
         tools::draw_text(
           view,
           fmt::format(
