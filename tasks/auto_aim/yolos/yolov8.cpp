@@ -62,7 +62,8 @@ YOLOV8::YOLOV8(const std::string & config_path, bool debug, int infer_threads)
   // 这时 compile_model 会抛 ov::Exception，我们在 catch 里降级。
   auto try_compile = [&](const std::string & dev) {
     try {
-      if (infer_threads > 0)
+      if (infer_threads > 0 && dev == "CPU")
+        // inference_num_threads 是 CPU 插件专属选项，GPU/AUTO 不接受
         compiled_model_ = core_.compile_model(
           model, dev, ov::num_streams(1), ov::inference_num_threads(infer_threads));
       else

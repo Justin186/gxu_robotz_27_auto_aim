@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <list>
 #include <map>
 #include <optional>
@@ -83,6 +84,14 @@ int main(int argc, char * argv[])
   auto display = cli.has("display");
   auto use_rerun = cli.has("rerun");
   auto rerun_ip = cli.get<std::string>("ip");
+
+  // SSH/无头环境下 imshow 会因 GTK 初始化失败直接 abort，自动关掉
+  const bool has_display_env =
+    std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr;
+  if (display && !has_display_env) {
+    tools::logger()->warn("no DISPLAY/WAYLAND_DISPLAY, --display disabled");
+    display = false;
+  }
 
 #ifdef USE_RERUN
   std::optional<rerun::RecordingStream> rec;

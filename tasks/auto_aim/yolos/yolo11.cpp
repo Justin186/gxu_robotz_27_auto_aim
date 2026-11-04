@@ -53,7 +53,8 @@ YOLO11::YOLO11(const std::string & config_path, bool debug, int infer_threads)
   // 尝试用户指定的设备，失败时自动 fallback：指定 → AUTO → CPU。
   auto try_compile = [&](const std::string & dev) {
     try {
-      if (infer_threads > 0)
+      if (infer_threads > 0 && dev == "CPU")
+        // inference_num_threads 是 CPU 插件专属选项，GPU/AUTO 不接受
         compiled_model_ = core_.compile_model(
           model, dev, ov::num_streams(1), ov::inference_num_threads(infer_threads));
       else
