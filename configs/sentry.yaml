@@ -64,6 +64,7 @@ can_interface: "can0"
 
 #####-----云台参数-----#####
 com_port: "/dev/ttyACM0"
+crc_byte_order: big
 
 #####-----tracker参数-----#####
 min_detect_count: 5
