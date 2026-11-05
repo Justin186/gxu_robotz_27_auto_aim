@@ -313,6 +313,12 @@ if(BUILD_TESTS)
     target_link_libraries(${tgt} ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
   endforeach()
 
+  # ---- 云台 + 底盘通信联调：导航通道只有哨兵协议才有 ----
+  if(GIMBAL_PROTOCOL STREQUAL "sentry")
+    add_executable(communication_test tests/communication_test.cpp)
+    target_link_libraries(communication_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
+  endif()
+
   # ---- 需要 auto_aim ----
   if(BUILD_AUTO_AIM)
     foreach(tgt auto_aim_test camera_detect_test camera_detect_distance_test
