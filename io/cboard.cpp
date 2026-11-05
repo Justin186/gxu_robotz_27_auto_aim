@@ -55,8 +55,8 @@ void CBoard::send(Command command) const
   frame.data[3] = (int16_t)(command.yaw * 1e4);
   frame.data[4] = (int16_t)(command.pitch * 1e4) >> 8;
   frame.data[5] = (int16_t)(command.pitch * 1e4);
-  frame.data[6] = (int16_t)(command.horizon_distance * 1e4) >> 8;
-  frame.data[7] = (int16_t)(command.horizon_distance * 1e4);
+  frame.data[6] = 0;
+  frame.data[7] = 0;
 
   try {
     can_.write(&frame);
@@ -87,16 +87,14 @@ void CBoard::callback(const can_frame & frame)
     bullet_speed = (int16_t)(frame.data[0] << 8 | frame.data[1]) / 1e2;
     mode = Mode(frame.data[2]);
     shoot_mode = ShootMode(frame.data[3]);
-    ft_angle = (int16_t)(frame.data[4] << 8 | frame.data[5]) / 1e4;
-
     // 限制日志输出频率为1Hz
     static auto last_log_time = std::chrono::steady_clock::time_point::min();
     auto now = std::chrono::steady_clock::now();
 
     if (bullet_speed > 0 && tools::delta_time(now, last_log_time) >= 1.0) {
       tools::logger()->info(
-        "[CBoard] Bullet speed: {:.2f} m/s, Mode: {}, Shoot mode: {}, FT angle: {:.2f} rad",
-        bullet_speed, MODES[mode], SHOOT_MODES[shoot_mode], ft_angle);
+        "[CBoard] Bullet speed: {:.2f} m/s, Mode: {}, Shoot mode: {}",
+        bullet_speed, MODES[mode], SHOOT_MODES[shoot_mode]);
       last_log_time = now;
     }
   }

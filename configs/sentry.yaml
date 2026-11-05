@@ -28,10 +28,12 @@ fov_h: 57.7 #87.7
 fov_v: 56.7 
 new_fov_h: 27 #67
 new_fov_v: 40.9
-usb_frame_rate: 120
+usb_frame_rate: 60
 usb_exposure: 500 #1-80000______250
 usb_gamma: 160
 usb_gain: 10 #0-96
+
+side_infer_threads: 4 #仅在GPU/IGPU无法使用，CPU推理时限核保证主相机帧率
 
 #####-----工业相机参数-----#####
 camera_name: "hikrobot"
@@ -60,6 +62,7 @@ can_interface: "can0"
 
 #####-----云台参数-----#####
 com_port: "/dev/ttyACM0"
+crc_byte_order: big
 
 #####-----tracker参数-----#####
 min_detect_count: 5

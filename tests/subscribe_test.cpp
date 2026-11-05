@@ -1,4 +1,5 @@
-#include <rclcpp/rclcpp.hpp>
+// 自测：打印导航下发的内容（底盘速度指令 + 哨兵姿态指令），用来确认视觉这边收得到。
+#include <chrono>
 #include <thread>
 
 #include "io/ros2/ros2.hpp"
@@ -10,17 +11,19 @@ int main(int argc, char ** argv)
   tools::Exiter exiter;
   io::ROS2 ros2;
 
-  int i = 0;
   while (!exiter.exit()) {
-    auto x = ros2.subscribe_enemy_status();
-    // tools::logger()->info("invincible enemy ids size is{}", x.size());
-    for (const auto & id : x) {
-      tools::logger()->info("id:{}", id);
+    // cmd_vel 取走后会被清空，没有新指令时返回 nullopt
+    if (auto v = ros2.cmd_vel(); v.has_value()) {
+      tools::logger()->info(
+        "cmd_vel: linear=({:.3f}, {:.3f}, {:.3f}) angular=({:.3f}, {:.3f}, {:.3f})", v->linear.x,
+        v->linear.y, v->linear.z, v->angular.x, v->angular.y, v->angular.z);
     }
-    // i++;
 
-    std::this_thread::sleep_for(std::chrono::microseconds(500));
-    // if (i > 1000) break;
+    if (auto posture = ros2.sentry_posture(); posture != 0) {
+      tools::logger()->info("sentry posture: {}", posture);
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
   return 0;
 }

@@ -45,9 +45,11 @@ int main(int argc, char * argv[])
     auto gs = gimbal.state();
     auto plan = planner.plan(target, gs.bullet_speed, gs.yaw, gs.pitch, gs.yaw_offset, gs.pitch_offset);
 
+    // 下发的应该是 v_yaw / v_pitch（已叠加稳态补偿偏置），
+    // plan.yaw / plan.pitch 是纯净目标轨迹，只用于观察
     gimbal.send(
-      plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
-      plan.pitch_acc);
+      plan.control, plan.fire, plan.v_yaw, plan.yaw_vel, plan.yaw_acc, plan.v_pitch,
+      plan.pitch_vel, plan.pitch_acc);
 
     nlohmann::json data;
     data["t"] = tools::delta_time(std::chrono::steady_clock::now(), t0);

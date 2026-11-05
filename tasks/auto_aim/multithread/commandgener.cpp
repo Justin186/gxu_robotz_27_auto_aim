@@ -49,11 +49,6 @@ void CommandGener::generate_command()
     if (input) {
       auto command = aimer_.aim(input->targets_, input->t, input->bullet_speed);
       command.shoot = shooter_.shoot(command, aimer_, input->targets_, input->gimbal_pos);
-      command.horizon_distance = input->targets_.empty()
-                                   ? 0
-                                   : std::sqrt(
-                                       tools::square(input->targets_.front().ekf_x()[0]) +
-                                       tools::square(input->targets_.front().ekf_x()[2]));
       cboard_.send(command);
       if (debug_) {
         nlohmann::json data;
@@ -61,7 +56,6 @@ void CommandGener::generate_command()
         data["cmd_yaw"] = command.yaw * 57.3;
         data["cmd_pitch"] = command.pitch * 57.3;
         data["shoot"] = command.shoot;
-        data["horizon_distance"] = command.horizon_distance;
         plotter_.plot(data);
       }
     }

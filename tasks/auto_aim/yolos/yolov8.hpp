@@ -18,7 +18,7 @@ namespace auto_aim
 class YOLOV8 : public YOLOBase
 {
 public:
-  YOLOV8(const std::string & config_path, bool debug);
+  YOLOV8(const std::string & config_path, bool debug, int infer_threads = 0);
 
   std::list<Armor> detect(const cv::Mat & bgr_img, int frame_count) override;
 
