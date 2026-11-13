@@ -13,6 +13,25 @@
 | 下位机 | RoboMaster 开发板 C 型（STM32F407） |
 | 通信 | MicroUSB 虚拟串口（云台协议；哨兵同一个串口上还有导航帧） |
 
+## 独立导航发送程序
+
+`navigation_sender` 只打开串口并发送哨兵导航下行帧，不启动云台接收线程，也不依赖 ROS2：
+
+```bash
+./build/navigation_sender /dev/ttyACM0 \
+  <linear_x> <linear_y> <linear_z> \
+  <angular_x> <angular_y> <angular_z> \
+  <move_mode> [baudrate] [rate_hz] [little|big]
+```
+
+例如以 20 Hz 发送停止移动指令（姿态为移动）：
+
+```bash
+./build/navigation_sender /dev/ttyACM0 0 0 0 0 0 0 3 115200 20 little
+```
+
+程序发送的是独立导航协议：`0xA5 + 六个 float 速度 + move_mode + CRC16`，按 `Ctrl+C` 停止。
+
 ## 依赖
 
 **必需**

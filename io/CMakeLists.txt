@@ -6,6 +6,10 @@ find_package(OpenCV REQUIRED)
 # 串口库（第三方，自带 CMakeLists）
 add_subdirectory(serial)
 
+add_library(navigation_protocol STATIC navigation_sender.cpp)
+target_link_libraries(navigation_protocol PUBLIC serial tools)
+target_include_directories(navigation_protocol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
 # ============================================================================
 # io 拆成多个 target，按需链接：
 #

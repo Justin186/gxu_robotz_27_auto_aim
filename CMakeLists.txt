@@ -201,6 +201,9 @@ include_directories(${PROJECT_SOURCE_DIR})
 add_subdirectory(tools)
 add_subdirectory(io)
 
+add_executable(navigation_sender tools/navigation_sender.cpp)
+target_link_libraries(navigation_sender PRIVATE navigation_protocol)
+
 if(BUILD_AUTO_AIM)
   add_subdirectory(tasks/auto_aim)
 endif()
