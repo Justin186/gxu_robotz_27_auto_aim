@@ -266,6 +266,12 @@ if(BUILD_NAV AND BUILD_OMNIPERCEPTION)
   target_link_libraries(sentry ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
 endif()
 
+# 无侧向感知版哨兵：不需要左右 USB 相机和 omniperception
+if(BUILD_NAV AND BUILD_AUTO_AIM)
+  add_executable(sentry_no_omni src/sentry_no_omni.cpp)
+  target_link_libraries(sentry_no_omni ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
+endif()
+
 # ---- 调试可视化（rerun）----
 if(BUILD_DEBUG)
   if(BUILD_AUTO_AIM)
