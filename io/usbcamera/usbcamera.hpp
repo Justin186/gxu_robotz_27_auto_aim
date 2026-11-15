@@ -1,6 +1,7 @@
 #ifndef IO__USBCamera_HPP
 #define IO__USBCamera_HPP
 
+#include <atomic>
 #include <chrono>
 #include <iostream>
 #include <opencv2/opencv.hpp>
@@ -17,6 +18,8 @@ public:
   ~USBCamera();
   cv::Mat read();
   void read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp);
+  bool try_read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp);
+  uint64_t capture_count() const { return capture_count_; }
   std::string device_name;
 
 private:
@@ -35,6 +38,7 @@ private:
   double image_width_, image_height_;
   int usb_gamma_, usb_gain_;
   bool quit_, ok_;
+  std::atomic<uint64_t> capture_count_{0};
   std::thread capture_thread_;
   std::thread daemon_thread_;
   tools::ThreadSafeQueue<CameraData> queue_;

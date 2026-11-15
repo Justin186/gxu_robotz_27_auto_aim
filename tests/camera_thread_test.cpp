@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <cstdlib>
 #include <unistd.h>
 
 #include <chrono>
@@ -52,7 +53,10 @@ int main(int argc, char * argv[])
   auto process_thread = std::thread([&]() {
     tools::Frame process_frame;
     while (!exiter.exit()) {
-      process_frame = frame_queue.dequeue();
+      if (!frame_queue.try_dequeue(process_frame)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        continue;
+      }
       auto img = process_frame.img;
       auto armors = process_frame.armors;
       auto t = process_frame.t;
@@ -68,7 +72,9 @@ int main(int argc, char * argv[])
 
   io::Camera camera(config_path);
   int num_yolo_thread = 8;
-  auto yolos = tools::create_yolov8s(config_path, num_yolo_thread, true);
+  const bool has_display = std::getenv("DISPLAY") != nullptr ||
+                           std::getenv("WAYLAND_DISPLAY") != nullptr;
+  auto yolos = tools::create_yolov8s(config_path, num_yolo_thread, has_display);
   // auto yolos = tools::create_yolo11s(config_path, num_yolo_thread, true);
   std::vector<bool> yolo_used(num_yolo_thread, false);
   tools::ThreadPool thread_pool(num_yolo_thread);
@@ -79,7 +85,6 @@ int main(int argc, char * argv[])
   std::chrono::steady_clock::time_point last_t = std::chrono::steady_clock::now();
 
   int frame_id = 0;
-
   while (!exiter.exit()) {
     camera.read(img, t);
     auto dt = tools::delta_time(t, last_t);
@@ -114,9 +119,9 @@ int main(int argc, char * argv[])
     });
     plotter.plot(data);
 
-    auto key = cv::waitKey(1);
-    if (key == 'q') break;
+    if (has_display && cv::waitKey(1) == 'q') break;
   }
 
+  process_thread.join();
   return 0;
 }

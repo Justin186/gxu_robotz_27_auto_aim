@@ -31,7 +31,7 @@ int main(int argc, char * argv[])
 
   // 初始化云台
   io::Gimbal gimbal(config_path);
-  io::VisionToGimbal plan;
+  io::GimbalCommand plan;
   auto last_t = std::chrono::steady_clock::now();
   plan.yaw = 0;
   plan.yaw_vel = 0;
@@ -43,12 +43,15 @@ int main(int argc, char * argv[])
   while (!exiter.exit()) {
     auto now = std::chrono::steady_clock::now();
     auto gs = gimbal.state();
-    if(tools::delta_time(now, last_t) > 1.600) {
-        plan.mode = 2;
-        tools::logger()->debug("fire!");
-        last_t = now;
-    } else plan.mode = 1;
-
+    if (tools::delta_time(now, last_t) > 1.600) {
+      plan.control = true;
+      plan.fire = true;
+      tools::logger()->debug("fire!");
+      last_t = now;
+    } else {
+      plan.control = true;
+      plan.fire = false;
+    }
 
     gimbal.send(plan);
 
@@ -56,8 +59,8 @@ int main(int argc, char * argv[])
 
     nlohmann::json data;
 
-    if (plan.mode != 0) {
-      data["shoot"] = plan.mode == 2 ? 1 : 0;
+    if (plan.control) {
+      data["shoot"] = plan.fire ? 1 : 0;
     }
 
     plotter.plot(data);

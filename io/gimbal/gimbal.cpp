@@ -1,20 +1,43 @@
 #include "gimbal.hpp"
 
-#include <algorithm>
-#include <numeric>
-#include <deque>
-
-#include "tools/crc.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
 
 namespace io
 {
+namespace
+{
+const char * order_name(tools::CrcByteOrder order)
+{
+  return order == tools::CrcByteOrder::Big ? "big" : "little";
+}
+}  // namespace
+
 Gimbal::Gimbal(const std::string & config_path)
 {
   auto yaml = tools::load(config_path);
   auto com_port = tools::read<std::string>(yaml, "com_port");
+
+  // ---- 与电控的约定差异：集中在这里显式读取，不再散到业务代码里 ----
+
+  // CRC 写进帧尾两字节的顺序：
+  //   little —— 把 CRC 塞进 packed 结构体再整体发送（x86 / ARM 的自然结果）
+  //   big    —— 逐字节按高字节优先拼帧
+  auto crc_order_str = tools::read<std::string>(yaml, "crc_byte_order", "little");
+  if (crc_order_str == "big" || crc_order_str == "Big") {
+    crc_order_ = tools::CrcByteOrder::Big;
+  } else if (crc_order_str == "little" || crc_order_str == "Little") {
+    crc_order_ = tools::CrcByteOrder::Little;
+  } else {
+    tools::logger()->warn(
+      "[Gimbal] 无法识别的 crc_byte_order '{}'，按 little 处理（可选 little / big）",
+      crc_order_str);
+    crc_order_ = tools::CrcByteOrder::Little;
+  }
+
+  // pitch 的正负：有的电控把抬头当负方向，用 -1 翻过来
+  pitch_sign_ = tools::read<int>(yaml, "pitch_sign", 1) < 0 ? -1.0f : 1.0f;
 
   try {
     serial_.setPort(com_port);
@@ -23,6 +46,13 @@ Gimbal::Gimbal(const std::string & config_path)
     tools::logger()->error("[Gimbal] Failed to open serial: {}", e.what());
     exit(1);
   }
+
+  // 在等第一帧之前就把这台机器"和电控对过哪些约定"打出来，
+  // 免得电控没上电时看不到任何信息
+  tools::logger()->info(
+    "[Gimbal] 协议={}, crc_byte_order={}, pitch_sign={}, 偏置={}, 导航通道={}", GimbalProtocol::name(),
+    order_name(crc_order_), pitch_sign_ > 0 ? 1 : -1,
+    GimbalProtocol::has_offset ? "带" : "不带", GimbalProtocol::has_nav ? "有" : "无");
 
   thread_ = std::thread(&Gimbal::read_thread, this);
 
@@ -81,44 +111,32 @@ Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t)
   }
 }
 
-void Gimbal::send(io::VisionToGimbal VisionToGimbal)
+void Gimbal::send(const GimbalCommand & cmd)
 {
-  tx_data_.mode = VisionToGimbal.mode;
-  tx_data_.yaw = VisionToGimbal.yaw;
-  tx_data_.yaw_vel = VisionToGimbal.yaw_vel;
-  tx_data_.yaw_acc = VisionToGimbal.yaw_acc;
-  tx_data_.pitch = VisionToGimbal.pitch;
-  tx_data_.pitch_vel = VisionToGimbal.pitch_vel;
-  tx_data_.pitch_acc = VisionToGimbal.pitch_acc;
-  tx_data_.crc16 = tools::get_crc16(
-    reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_) - sizeof(tx_data_.crc16));
+  // 内部约定（抬头为正）→ 这块电控的实际约定
+  GimbalCommand adj = cmd;
+  adj.pitch *= pitch_sign_;
+  adj.pitch_vel *= pitch_sign_;
+  adj.pitch_acc *= pitch_sign_;
 
-  try {
-    serial_.write(reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_));
-  } catch (const std::exception & e) {
-    tools::logger()->warn("[Gimbal] Failed to write serial: {}", e.what());
-  }
+  uint8_t frame[GimbalProtocol::max_frame_size];
+  GimbalProtocol::tx_encode(adj, frame, crc_order_);
+  write_frame(frame, GimbalProtocol::tx_frame_size);
 }
 
 void Gimbal::send(
   bool control, bool fire, float yaw, float yaw_vel, float yaw_acc, float pitch, float pitch_vel,
   float pitch_acc)
 {
-  tx_data_.mode = control ? (fire ? 2 : 1) : 0;
-  tx_data_.yaw = yaw;
-  tx_data_.yaw_vel = yaw_vel;
-  tx_data_.yaw_acc = yaw_acc;
-  tx_data_.pitch = pitch;
-  tx_data_.pitch_vel = pitch_vel;
-  tx_data_.pitch_acc = pitch_acc;
-  tx_data_.crc16 = tools::get_crc16(
-    reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_) - sizeof(tx_data_.crc16));
+  send(GimbalCommand{control, fire, yaw, yaw_vel, yaw_acc, pitch, pitch_vel, pitch_acc});
+}
 
-  try {
-    serial_.write(reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_));
-  } catch (const std::exception & e) {
-    tools::logger()->warn("[Gimbal] Failed to write serial: {}", e.what());
+const RxFrameSpec * Gimbal::find_rx_frame(uint8_t head0)
+{
+  for (size_t i = 0; i < GimbalProtocol::rx_frame_count; ++i) {
+    if (GimbalProtocol::rx_frames[i].head0 == head0) return &GimbalProtocol::rx_frames[i];
   }
+  return nullptr;
 }
 
 bool Gimbal::read(uint8_t * buffer, size_t size)
@@ -131,10 +149,25 @@ bool Gimbal::read(uint8_t * buffer, size_t size)
   }
 }
 
+void Gimbal::write_frame(const uint8_t * frame, size_t size)
+{
+  std::lock_guard<std::mutex> lock(serial_mutex_);
+  try {
+    serial_.write(frame, size);
+  } catch (const std::exception & e) {
+    tools::logger()->warn("[Gimbal] Failed to write serial: {}", e.what());
+  }
+}
+
 void Gimbal::read_thread()
 {
-  tools::logger()->info("[Gimbal] read_thread started.");
+  tools::logger()->info(
+    "[Gimbal] read_thread started. ({} 种上行帧)", GimbalProtocol::rx_frame_count);
+
   int error_count = 0;
+
+  static_assert(GimbalProtocol::max_frame_size <= 128, "一帧不该超过 128 字节");
+  uint8_t frame[GimbalProtocol::max_frame_size];
 
   while (!quit_) {
     if (error_count > 10000) {
@@ -144,75 +177,82 @@ void Gimbal::read_thread()
       continue;
     }
 
-    if (!read(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_.head))) {
+    // ① 先读一个字节，按它在帧表里找是哪一种帧
+    uint8_t head0;
+    if (!read(&head0, 1)) {
       error_count++;
       continue;
     }
 
-    if (rx_data_.head[0] != 'S' || rx_data_.head[1] != 'P') continue;
+    const auto * spec = find_rx_frame(head0);
+    if (spec == nullptr) continue;  // 不在帧表里，丢弃这个字节重新对齐
+
+    frame[0] = head0;
+
+    // ② 校验第二个帧头字节。先校验再往下读，避免帧头不匹配时把后面一帧的开头吃掉
+    uint8_t head1;
+    if (!read(&head1, 1)) {
+      error_count++;
+      continue;
+    }
+    if (head1 != spec->head1) continue;
+    frame[1] = head1;
 
     auto t = std::chrono::steady_clock::now();
 
-    if (!read(
-          reinterpret_cast<uint8_t *>(&rx_data_) + sizeof(rx_data_.head),
-          sizeof(rx_data_) - sizeof(rx_data_.head))) {
+    // ③ 读完剩下的部分
+    if (!read(frame + 2, spec->size - 2)) {
       error_count++;
       continue;
     }
 
-    if (!tools::check_crc16(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_))) {
-      tools::logger()->debug("[Gimbal] CRC16 check failed.");
+    if (!GimbalProtocol::rx_check(*spec, frame, crc_order_)) {
+      // 用另一种字节序再试一次：命中就说明电控的约定和我们配的不一样。
+      // 只打日志提示，绝不采信 —— 免得把真·校验失败也放过去。
+      const auto other = crc_order_ == tools::CrcByteOrder::Big ? tools::CrcByteOrder::Little
+                                                                : tools::CrcByteOrder::Big;
+      if (GimbalProtocol::rx_check(*spec, frame, other) && !crc_hint_printed_.exchange(true)) {
+        tools::logger()->warn(
+          "[Gimbal] CRC 按 {} 校验失败、按 {} 通过 —— 这块电控的 CRC 字节序很可能是 {}。"
+          "请把配置里的 crc_byte_order 改成 \"{}\"（改完不需要重新编译）",
+          order_name(crc_order_), order_name(other), order_name(other), order_name(other));
+      } else if (!crc_hint_printed_.load()) {
+        tools::logger()->debug(
+          "[Gimbal] CRC16 check failed (kind {}).", static_cast<int>(spec->kind));
+      }
       continue;
     }
 
     error_count = 0;
-    Eigen::Quaterniond q(rx_data_.q[0], rx_data_.q[1], rx_data_.q[2], rx_data_.q[3]);
-    queue_.push({q, t});
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    RxOut out;
+    GimbalProtocol::rx_decode(*spec, frame, out);
 
-    // // 对弹速进行平滑滤波（取历史10次，去2个最高、2个最低，剩余取平均）
-    // // 注意：假设裁判系统测出的抖动值存放于 bullet_speed
-    // bullet_speed_history_.push_back(rx_data_.bullet_speed);
-    // if (bullet_speed_history_.size() > 10) {
-    //   bullet_speed_history_.pop_front();
-    // }
-    
-    // if (bullet_speed_history_.size() == 10) {
-    //   std::vector<float> sorted_history(bullet_speed_history_.begin(), bullet_speed_history_.end());
-    //   std::sort(sorted_history.begin(), sorted_history.end());
-    //   float sum = std::accumulate(sorted_history.begin() + 2, sorted_history.end() - 2, 0.0f);
-    //   state_.bullet_speed = sum / 6.0f;
-    // } else {
-    //   state_.bullet_speed = rx_data_.bullet_speed;
-    // }
+    if (spec->kind == RxKind::Vision) {
+      auto & fb = out.vision;
 
-    state_.yaw = rx_data_.yaw;
-    state_.yaw_vel = rx_data_.yaw_vel;
-    state_.pitch = rx_data_.pitch;
-    state_.pitch_vel = rx_data_.pitch_vel;
-    state_.bullet_speed = rx_data_.bullet_speed;
-    state_.bullet_count = rx_data_.bullet_count;
-    state_.yaw_offset = rx_data_.yaw_offset;
-    state_.pitch_offset = rx_data_.pitch_offset;
+      // 这块电控的实际符号约定 → 内部约定（抬头为正）
+      fb.pitch *= pitch_sign_;
+      fb.pitch_vel *= pitch_sign_;
 
-    switch (rx_data_.mode) {
-      case 0:
-        mode_ = GimbalMode::IDLE;
-        break;
-      case 1:
-        mode_ = GimbalMode::AUTO_AIM;
-        break;
-      case 2:
-        mode_ = GimbalMode::SMALL_BUFF;
-        break;
-      case 3:
-        mode_ = GimbalMode::BIG_BUFF;
-        break;
-      default:
-        mode_ = GimbalMode::IDLE;
-        tools::logger()->warn("[Gimbal] Invalid mode: {}", rx_data_.mode);
-        break;
+      queue_.push({fb.q, t});
+
+      std::lock_guard<std::mutex> lock(mutex_);
+      state_.yaw = fb.yaw;
+      state_.yaw_vel = fb.yaw_vel;
+      state_.pitch = fb.pitch;
+      state_.pitch_vel = fb.pitch_vel;
+      state_.bullet_speed = fb.bullet_speed;
+      state_.bullet_count = fb.bullet_count;
+      state_.yaw_offset = fb.yaw_offset;
+      state_.pitch_offset = fb.pitch_offset;
+      mode_ = fb.mode;
+      if (!fb.mode_valid) {
+        tools::logger()->warn("[Gimbal] Invalid mode: {}", fb.raw_mode);
+      }
+    } else {
+      std::lock_guard<std::mutex> lock(mutex_);
+      nav_state_ = out.nav;
     }
   }
 

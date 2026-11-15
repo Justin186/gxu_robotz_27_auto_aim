@@ -14,13 +14,15 @@
 
 namespace auto_aim
 {
-YOLOV8::YOLOV8(const std::string & config_path, bool debug)
+YOLOV8::YOLOV8(const std::string & config_path, bool debug, int infer_threads)
 : classifier_(config_path), detector_(config_path), debug_(debug)
 {
   auto yaml = YAML::LoadFile(config_path);
 
   model_path_ = yaml["yolov8_model_path"].as<std::string>();
   device_ = yaml["device"].as<std::string>();
+  // device_ 是 yaml 里用户想要的设备，下面尝试 compile_model 时如果插件
+  // 不存在（比如开发机没装 OpenVINO GPU 插件），会自动 fallback 到 AUTO。
   binary_threshold_ = yaml["threshold"].as<double>();
   min_confidence_ = yaml["min_confidence"].as<double>();
   int x = 0, y = 0, width = 0, height = 0;
@@ -54,8 +56,39 @@ YOLOV8::YOLOV8(const std::string & config_path, bool debug)
 
   // TODO: ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)
   model = ppp.build();
-  compiled_model_ = core_.compile_model(
-    model, device_, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
+
+  // 尝试用户指定的设备，失败时自动 fallback：指定 → AUTO → CPU。
+  // 典型场景：yaml 写了 device: GPU，但机器上没装 OpenVINO GPU 插件（驱动 / runtime），
+  // 这时 compile_model 会抛 ov::Exception，我们在 catch 里降级。
+  auto try_compile = [&](const std::string & dev) {
+    try {
+      if (infer_threads > 0 && dev == "CPU")
+        // inference_num_threads 是 CPU 插件专属选项，GPU/AUTO 不接受
+        compiled_model_ = core_.compile_model(
+          model, dev, ov::num_streams(1), ov::inference_num_threads(infer_threads));
+      else
+        compiled_model_ = core_.compile_model(
+          model, dev, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
+      return true;
+    } catch (const ov::Exception & e) {
+      tools::logger()->warn("compile_model on device '{}' failed: {}", dev, e.what());
+      return false;
+    }
+  };
+
+  if (!try_compile(device_)) {
+    tools::logger()->warn("Falling back to AUTO for YOLOV8");
+    if (!try_compile("AUTO")) {
+      tools::logger()->warn("Falling back to CPU for YOLOV8");
+      if (!try_compile("CPU")) {
+        throw;  // CPU 也不行就真的救不了了，原样抛出
+      }
+      device_ = "CPU";
+    } else {
+      device_ = "AUTO";
+    }
+  }
+  tools::logger()->info("YOLOV8 compiled on device '{}'", device_);
 }
 
 std::list<Armor> YOLOV8::detect(const cv::Mat & raw_img, int frame_count)

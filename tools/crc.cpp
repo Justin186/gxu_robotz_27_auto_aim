@@ -62,10 +62,7 @@ uint8_t get_crc8(const uint8_t * data, uint16_t len)
   return crc8;
 }
 
-bool check_crc8(const uint8_t * data, uint16_t len)
-{
-  return get_crc8(data, len - 1) == data[len - 1];
-}
+bool check_crc8(const uint8_t * data, uint16_t len) { return get_crc8(data, len - 1) == data[len - 1]; }
 
 uint16_t get_crc16(const uint8_t * data, uint32_t len)
 {
@@ -82,11 +79,35 @@ uint16_t get_crc16(const uint8_t * data, uint32_t len)
   return crc16;
 }
 
+uint16_t get_crc16_field(const uint8_t * data, uint32_t len, CrcByteOrder order)
+{
+  if (order == CrcByteOrder::Little) {
+    return static_cast<uint16_t>(data[len - 2] | (data[len - 1] << 8));
+  }
+  return static_cast<uint16_t>((data[len - 2] << 8) | data[len - 1]);
+}
+
+bool check_crc16(const uint8_t * data, uint32_t len, CrcByteOrder order)
+{
+  return get_crc16(data, len - 2) == get_crc16_field(data, len, order);
+}
+
 bool check_crc16(const uint8_t * data, uint32_t len)
 {
-  uint16_t crc16 = (data[len - 2] << 8) | data[len - 1];
-  // uint16_t crc16 = (data[len - 1] << 8) | data[len - 2];
-  return get_crc16(data, len - 2) == crc16;
+  // 26 赛季 check_crc16 的实际行为就是按大端读，这里保持一致
+  return check_crc16(data, len, CrcByteOrder::Big);
+}
+
+void put_crc16(uint8_t * data, uint32_t len, CrcByteOrder order)
+{
+  const uint16_t crc = get_crc16(data, len);
+  if (order == CrcByteOrder::Little) {
+    data[len] = static_cast<uint8_t>(crc & 0xff);
+    data[len + 1] = static_cast<uint8_t>((crc >> 8) & 0xff);
+  } else {
+    data[len] = static_cast<uint8_t>((crc >> 8) & 0xff);
+    data[len + 1] = static_cast<uint8_t>(crc & 0xff);
+  }
 }
 
 }  // namespace tools
