@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <optional>
 #include <thread>
 
@@ -15,10 +16,15 @@
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
+#include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/recorder.hpp"
 #include "tools/thread_safe_queue.hpp"
+
+#ifdef USE_RERUN
+#include <rerun.hpp>
+#endif
 
 // ============================================================================
 // 27 赛季哨兵主程序（无侧向感知版）
@@ -61,6 +67,16 @@ constexpr double kScanSpeed = 2.0;
 // 丢掉目标后先保持不动这么多帧，给 tracker 一点恢复时间再切扫描
 constexpr int kLostFramesBeforeScan = 25;
 
+void draw_armors(cv::Mat & img, const std::list<auto_aim::Armor> & armors)
+{
+  for (const auto & armor : armors) {
+    cv::rectangle(img, armor.box, {0, 255, 0}, 1);
+    tools::draw_points(img, armor.points, {0, 255, 0});
+    tools::draw_text(
+      img, fmt::format("{:.2f}", armor.confidence), armor.box.tl(), {0, 255, 0}, 0.6, 1);
+  }
+}
+
 // 发给导航的瞄准目标 (x, y, z, 装甲编号+1)，等价于 Decider::get_target_info，
 // 只是不依赖侧向相机，因此搬到这里、去掉对 omniperception 的链接
 Eigen::Vector4d target_info(
@@ -82,6 +98,9 @@ Eigen::Vector4d target_info(
 const std::string keys =
   "{help h usage ? |                       | 输出命令行参数说明}"
   "{rec            | false                 | 是否录制图像与四元数}"
+  "{d display      |                       | 显示主相机画面（检测框 + 重投影）}"
+  "{rerun          |                       | 推送主相机画面到 rerun viewer（需 BUILD_DEBUG=ON 编译）}"
+  "{ip             | 127.0.0.1             | rerun viewer 的 IP 地址 }"
   "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
 
 int main(int argc, char * argv[])
@@ -97,9 +116,34 @@ int main(int argc, char * argv[])
     return 0;
   }
   auto record = cli.get<bool>("rec");
+  auto display = cli.has("display");
+  auto use_rerun = cli.has("rerun");
+  auto rerun_ip = cli.get<std::string>("ip");
+
+  // SSH/无头环境下 imshow 会因 GTK 初始化失败直接 abort，自动关掉
+  const bool has_display_env =
+    std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr;
+  if (display && !has_display_env) {
+    tools::logger()->warn("no DISPLAY/WAYLAND_DISPLAY, --display disabled");
+    display = false;
+  }
 
   tools::Exiter exiter;
   tools::Recorder recorder;
+
+#ifdef USE_RERUN
+  std::optional<rerun::RecordingStream> rec_stream;
+  if (use_rerun) {
+    rec_stream.emplace("gxu_sentry_no_omni");
+    rec_stream->connect_grpc("rerun+http://" + rerun_ip + ":9876/proxy").exit_on_failure();
+    tools::logger()->info("rerun connected: {}:9876", rerun_ip);
+  }
+#else
+  if (use_rerun) {
+    tools::logger()->warn("未启用 BUILD_DEBUG 编译，--rerun 无效");
+    use_rerun = false;
+  }
+#endif
 
   // ---- 通信：串口（视觉帧 + nav 帧）与 ROS2（与导航之间）----
   io::Gimbal gimbal(config_path);
@@ -227,7 +271,34 @@ int main(int argc, char * argv[])
     // 发往导航：当前瞄准目标
     ros2.publish_target(target_info(armors, targets), !targets.empty());
 
-    if (cv::waitKey(1) == 'q') break;
+    if (display || use_rerun) {
+      cv::Mat view = img.clone();
+      draw_armors(view, armors);
+      // tracker 解算出的目标装甲板位置重投影（黄色），用于验证 solver 是否正确
+      for (const auto & target : targets) {
+        for (const auto & xyza : target.armor_xyza_list()) {
+          auto pts =
+            solver.reproject_armor(xyza.head(3), xyza[3], target.armor_type, target.name);
+          tools::draw_points(view, pts, {255, 255, 0});
+        }
+      }
+      tools::draw_text(view, tracker.state(), {10, 30}, {255, 255, 255}, 0.8, 1);
+
+      if (display) {
+        cv::imshow("sentry_no_omni", view);
+        if (cv::waitKey(1) == 'q') break;
+      }
+#ifdef USE_RERUN
+      if (use_rerun) {
+        cv::Mat half;
+        cv::resize(view, half, {}, 0.5, 0.5);
+        std::vector<uchar> encoded;
+        cv::imencode(".jpg", half, encoded);
+        rec_stream->log("camera/main", rerun::EncodedImage::from_bytes(encoded));
+      }
+#endif
+    } else if (cv::waitKey(1) == 'q')
+      break;
   }
 
   quit = true;

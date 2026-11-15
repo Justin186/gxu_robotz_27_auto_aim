@@ -269,6 +269,10 @@ if(BUILD_NAV AND BUILD_OMNIPERCEPTION)
   # 但代码里不接左/右 USB 相机，所以不链接 omniperception。
   add_executable(sentry_no_omni src/sentry_no_omni.cpp)
   target_link_libraries(sentry_no_omni ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
+  if(BUILD_DEBUG)
+    target_link_libraries(sentry_no_omni rerun_sdk)
+    target_compile_definitions(sentry_no_omni PRIVATE USE_RERUN)
+  endif()
 endif()
 
 # ---- 调试可视化（rerun）----
@@ -363,6 +367,17 @@ if(BUILD_TESTS)
     if(BUILD_DEBUG)
       target_link_libraries(multithread_perception_test rerun_sdk)
       target_compile_definitions(multithread_perception_test PRIVATE USE_RERUN)
+    endif()
+  endif()
+
+  # ---- 哨兵主程序的调试版（带主相机图传）：逻辑同 src/sentry.cpp ----
+  if(BUILD_NAV AND BUILD_OMNIPERCEPTION)
+    add_executable(sentry_debug tests/sentry_debug.cpp)
+    target_link_libraries(sentry_debug
+      ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
+    if(BUILD_DEBUG)
+      target_link_libraries(sentry_debug rerun_sdk)
+      target_compile_definitions(sentry_debug PRIVATE USE_RERUN)
     endif()
   endif()
 

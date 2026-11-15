@@ -123,7 +123,7 @@ void USBCamera::open()
     cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
     cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
     cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
-  } else if (sharpness_ == 74) {
+  } else if (sharpness_ == 6) {
     device_name = "right";
     cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
     cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
