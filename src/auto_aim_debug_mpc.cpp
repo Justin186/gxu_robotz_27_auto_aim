@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <deque>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
@@ -314,6 +315,8 @@ int main(int argc, char * argv[])
   cv::Mat img;
   std::chrono::steady_clock::time_point t;
   auto last_t = std::chrono::steady_clock::now();
+  auto fps_start = last_t;
+  int fps_count = 0;
 
   while (!exiter.exit()) {
     camera.read(img, t);
@@ -361,6 +364,18 @@ int main(int argc, char * argv[])
     }
     if (rerun) rec->log("scalar/fps", rerun::Scalars((float)fps));
     auto key = cv::waitKey(1);
+
+    // 每秒输出主循环的平均处理帧率，关闭图像和 Rerun 时也可从终端查看。
+    ++fps_count;
+    auto fps_now = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(fps_now - fps_start).count();
+    if (elapsed >= 1.0) {
+      fmt::print("Processing FPS: {:.1f}\n", fps_count / elapsed);
+      std::fflush(stdout);
+      fps_count = 0;
+      fps_start = fps_now;
+    }
+
     if (key == 'q') break;
   }
 

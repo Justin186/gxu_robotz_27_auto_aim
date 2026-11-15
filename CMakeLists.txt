@@ -264,10 +264,9 @@ if(BUILD_NAV AND BUILD_OMNIPERCEPTION)
   # 是同济遗留、从未启用，已删除；调试图等主程序上机跑通后再按实际需要加。
   add_executable(sentry src/sentry.cpp)
   target_link_libraries(sentry ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-endif()
 
-# 无侧向感知版哨兵：不需要左右 USB 相机和 omniperception
-if(BUILD_NAV AND BUILD_AUTO_AIM)
+  # 无侧向感知版哨兵：与 sentry 同一条编译条件（同一批配置下一起编出来），
+  # 但代码里不接左/右 USB 相机，所以不链接 omniperception。
   add_executable(sentry_no_omni src/sentry_no_omni.cpp)
   target_link_libraries(sentry_no_omni ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 endif()
@@ -389,7 +388,7 @@ if(BUILD_NAV)
   endfunction()
 
   foreach(tgt publish_test subscribe_test topic_loop_test
-              sentry
+              sentry sentry_no_omni
               standard standard_mpc mt_auto_aim_debug
               auto_aim_sim auto_aim_sim_shm)
     sp_link_ros2_rpath(${tgt})
