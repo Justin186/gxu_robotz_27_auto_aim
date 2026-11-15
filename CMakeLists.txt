@@ -383,7 +383,7 @@ if(BUILD_NAV)
     if(TARGET ${tgt})
       target_link_options(${tgt} PRIVATE "-Wl,-rpath,${CMAKE_SOURCE_DIR}/rm_interfaces/lib")
       target_link_options(${tgt} PRIVATE "-Wl,-rpath,${CMAKE_SOURCE_DIR}/sp_msgs_install/sp_msgs/lib")
-      target_link_options(${tgt} PRIVATE "-Wl,--disable-new-dtags")
+      # target_link_options(${tgt} PRIVATE "-Wl,--disable-new-dtags")
     endif()
   endfunction()
 
