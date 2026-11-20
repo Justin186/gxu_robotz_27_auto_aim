@@ -29,11 +29,12 @@ fov_v: 56.7
 new_fov_h: 27 #67
 new_fov_v: 40.9
 usb_frame_rate: 60
-usb_exposure: 500 #1-80000______250
-usb_gamma: 160
-usb_gain: 10 #0-96
+usb_exposure: 1 #1-80000______250
+usb_gamma: 16
+usb_gain: 0 #0-96
 
-side_infer_threads: 4 #仅在GPU/IGPU无法使用，CPU推理时限核保证主相机帧率
+side_infer_threads: 6 #侧向相机CPU推理限线程数，避免抢占主循环CPU
+side_device: GPU #侧向相机推理设备(CPU/GPU)，GPU时side_infer_threads无效
 
 #####-----工业相机参数-----#####
 camera_name: "hikrobot"

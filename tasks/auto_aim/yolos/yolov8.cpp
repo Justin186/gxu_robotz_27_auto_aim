@@ -14,13 +14,14 @@
 
 namespace auto_aim
 {
-YOLOV8::YOLOV8(const std::string & config_path, bool debug, int infer_threads)
+YOLOV8::YOLOV8(
+  const std::string & config_path, bool debug, const std::string & device, int infer_threads)
 : classifier_(config_path), detector_(config_path), debug_(debug)
 {
   auto yaml = YAML::LoadFile(config_path);
 
   model_path_ = yaml["yolov8_model_path"].as<std::string>();
-  device_ = yaml["device"].as<std::string>();
+  device_ = device.empty() ? yaml["device"].as<std::string>() : device;
   // device_ 是 yaml 里用户想要的设备，下面尝试 compile_model 时如果插件
   // 不存在（比如开发机没装 OpenVINO GPU 插件），会自动 fallback 到 AUTO。
   binary_threshold_ = yaml["threshold"].as<double>();
@@ -63,9 +64,11 @@ YOLOV8::YOLOV8(const std::string & config_path, bool debug, int infer_threads)
   auto try_compile = [&](const std::string & dev) {
     try {
       if (infer_threads > 0 && dev == "CPU")
-        // inference_num_threads 是 CPU 插件专属选项，GPU/AUTO 不接受
+        // inference_num_threads 是 CPU 插件专属选项，GPU/AUTO 不接受；
+        // 限线程并固定到 E 核，把 P 核留给主循环和导航
         compiled_model_ = core_.compile_model(
-          model, dev, ov::num_streams(1), ov::inference_num_threads(infer_threads));
+          model, dev, ov::num_streams(1), ov::inference_num_threads(infer_threads),
+          ov::hint::scheduling_core_type(ov::hint::SchedulingCoreType::ECORE_ONLY));
       else
         compiled_model_ = core_.compile_model(
           model, dev, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));

@@ -370,15 +370,11 @@ if(BUILD_TESTS)
     endif()
   endif()
 
-  # ---- 哨兵主程序的调试版（带主相机图传）：逻辑同 src/sentry.cpp ----
+  # ---- 哨兵主程序的调试版：逻辑同 src/sentry.cpp ----
   if(BUILD_NAV AND BUILD_OMNIPERCEPTION)
     add_executable(sentry_debug tests/sentry_debug.cpp)
     target_link_libraries(sentry_debug
       ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-    if(BUILD_DEBUG)
-      target_link_libraries(sentry_debug rerun_sdk)
-      target_compile_definitions(sentry_debug PRIVATE USE_RERUN)
-    endif()
   endif()
 
   # ---- 需要 ROS2 ----

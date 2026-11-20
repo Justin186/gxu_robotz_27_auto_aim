@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <optional>
 #include <thread>
@@ -25,16 +26,10 @@
 #include "tools/recorder.hpp"
 #include "tools/thread_safe_queue.hpp"
 
-#ifdef USE_RERUN
-#include <rerun.hpp>
-#endif
-
 // ============================================================================
 // 27 赛季哨兵主程序的调试版：逻辑与 src/sentry.cpp 完全一致，
 // 额外提供主相机图传：
 //   --display   imshow 显示主相机画面（检测框 + 目标重投影）
-//   --rerun     推送主相机画面到 rerun viewer（需 BUILD_DEBUG=ON 编译）
-//   --ip        rerun viewer 地址（默认 127.0.0.1，端口 9876）
 //
 // 结构（三条线程 + 两条由库自己管的后台线程）：
 //
@@ -86,9 +81,7 @@ void draw_armors(cv::Mat & img, const std::list<auto_aim::Armor> & armors)
 const std::string keys =
   "{help h usage ? |                       | 输出命令行参数说明}"
   "{rec            | false                 | 是否录制图像与四元数}"
-  "{d display      |                       | 显示主相机画面（检测框 + 重投影）}"
-  "{rerun          |                       | 推送主相机画面到 rerun viewer（需 BUILD_DEBUG=ON 编译）}"
-  "{ip             | 127.0.0.1             | rerun viewer 的 IP 地址 }"
+  "{d display      | false                 | 显示主相机画面（检测框 + 重投影）}"
   "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
 
 int main(int argc, char * argv[])
@@ -104,9 +97,7 @@ int main(int argc, char * argv[])
     return 0;
   }
   auto record = cli.get<bool>("rec");
-  auto display = cli.has("display");
-  auto use_rerun = cli.has("rerun");
-  auto rerun_ip = cli.get<std::string>("ip");
+  auto display = cli.get<bool>("display");
 
   // SSH/无头环境下 imshow 会因 GTK 初始化失败直接 abort，自动关掉
   const bool has_display_env =
@@ -118,20 +109,6 @@ int main(int argc, char * argv[])
 
   tools::Exiter exiter;
   tools::Recorder recorder;
-
-#ifdef USE_RERUN
-  std::optional<rerun::RecordingStream> rec_stream;
-  if (use_rerun) {
-    rec_stream.emplace("gxu_sentry_debug");
-    rec_stream->connect_grpc("rerun+http://" + rerun_ip + ":9876/proxy").exit_on_failure();
-    tools::logger()->info("rerun connected: {}:9876", rerun_ip);
-  }
-#else
-  if (use_rerun) {
-    tools::logger()->warn("未启用 BUILD_DEBUG 编译，--rerun 无效");
-    use_rerun = false;
-  }
-#endif
 
   // ---- 通信：串口（视觉帧 + nav 帧）与 ROS2（与导航之间）----
   io::Gimbal gimbal(config_path);
@@ -150,7 +127,7 @@ int main(int argc, char * argv[])
 
   // ---- 侧向感知：左/右 USB 相机由 Perceptron 自己在后台跑 ----
   omniperception::Decider decider(config_path);
-  omniperception::Perceptron perceptron(&left_camera, &right_camera, config_path);
+  omniperception::Perceptron perceptron(&left_camera, &right_camera, config_path, display);
 
   // 主线程 → 控制线程。只保留最新一个目标，控制线程不追历史
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
@@ -257,10 +234,39 @@ int main(int argc, char * argv[])
   cv::Mat img;
   std::chrono::steady_clock::time_point t;
 
+  // 三路相机帧率统计：主相机按主循环计数，左/右 USB 按其采集线程的 capture_count 计数
+  uint64_t main_frames = 0;
+  uint64_t left_frames_last = left_camera.capture_count();
+  uint64_t right_frames_last = right_camera.capture_count();
+  auto fps_t0 = std::chrono::steady_clock::now();
+
+  // 最近一次统计到的帧率，供检测到目标时打印
+  double main_fps = 0.0, left_fps = 0.0, right_fps = 0.0;
+  auto last_target_print = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+  auto last_side_print = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+
   while (!exiter.exit()) {
     camera.read(img, t);
+    ++main_frames;
     auto q = gimbal.q(t);
     if (record) recorder.record(img, q, t);
+
+    // 每秒打印一次三路相机的实际帧率
+    auto fps_now = std::chrono::steady_clock::now();
+    double fps_elapsed = std::chrono::duration<double>(fps_now - fps_t0).count();
+    if (fps_elapsed >= 1.0) {
+      uint64_t left_now = left_camera.capture_count();
+      uint64_t right_now = right_camera.capture_count();
+      main_fps = main_frames / fps_elapsed;
+      left_fps = (left_now - left_frames_last) / fps_elapsed;
+      right_fps = (right_now - right_frames_last) / fps_elapsed;
+      tools::logger()->info(
+        "FPS main={:.1f} left={:.1f} right={:.1f}", main_fps, left_fps, right_fps);
+      main_frames = 0;
+      left_frames_last = left_now;
+      right_frames_last = right_now;
+      fps_t0 = fps_now;
+    }
 
     solver.set_R_gimbal2world(q);
 
@@ -268,10 +274,46 @@ int main(int argc, char * argv[])
     auto targets = tracker.track(armors, t);
     perceptron.set_pause(tracker.state() != "lost");
 
-    if (!targets.empty())
+    if (!targets.empty()) {
       target_queue.push(targets.front());
-    else
+
+      // 检测到目标时打印目标信息 + 三路相机帧率（限频 1Hz，避免刷屏）
+      auto tgt_now = std::chrono::steady_clock::now();
+      if (std::chrono::duration<double>(tgt_now - last_target_print).count() >= 1.0) {
+        const auto & target = targets.front();
+        for (const auto & armor : armors) {
+          if (armor.name == target.name) {
+            fmt::print(
+              "[TARGET] {} {} dist={:.2f}m conf={:.2f} | FPS main={:.1f} left={:.1f} "
+              "right={:.1f}\n",
+              auto_aim::ARMOR_NAMES[target.name], auto_aim::ARMOR_TYPES[target.armor_type],
+              armor.ypd_in_world[2], armor.confidence, main_fps, left_fps, right_fps);
+            std::fflush(stdout);
+            break;
+          }
+        }
+        last_target_print = tgt_now;
+      }
+    } else {
       target_queue.push(std::nullopt);
+    }
+
+    // 侧向相机检测到目标时打印目标信息 + 三路相机帧率（限频 1Hz）
+    auto side_now = std::chrono::steady_clock::now();
+    if (std::chrono::duration<double>(side_now - last_side_print).count() >= 1.0) {
+      for (const auto & kv : perceptron.get_latest_armors()) {
+        if (!kv.second.empty()) {
+          const auto & armor = kv.second.front();
+          fmt::print(
+            "[SIDE] {}: {} {} conf={:.2f} | FPS main={:.1f} left={:.1f} right={:.1f}\n",
+            kv.first, auto_aim::ARMOR_NAMES[armor.name], auto_aim::ARMOR_TYPES[armor.type],
+            armor.confidence, main_fps, left_fps, right_fps);
+          std::fflush(stdout);
+          last_side_print = side_now;
+          break;
+        }
+      }
+    }
 
     // 给导航的"是否发现敌人"，取 tracker 的结果而不是单帧观测，更稳定
     is_detect_enemy.store(!targets.empty());
@@ -279,7 +321,7 @@ int main(int argc, char * argv[])
     // 发往导航：当前瞄准目标
     ros2.publish_target(decider.get_target_info(armors, targets), !targets.empty());
 
-    if (display || use_rerun) {
+    if (display) {
       cv::Mat view = img.clone();
       draw_armors(view, armors);
       // tracker 解算出的目标装甲板位置重投影（黄色），用于验证 solver 是否正确
@@ -292,20 +334,24 @@ int main(int argc, char * argv[])
       }
       tools::draw_text(view, tracker.state(), {10, 30}, {255, 255, 255}, 0.8, 1);
 
-      if (display) {
-        cv::imshow("sentry_debug", view);
-        if (cv::waitKey(1) == 'q') break;
-      }
-#ifdef USE_RERUN
-      if (use_rerun) {
-        cv::Mat half;
-        cv::resize(view, half, {}, 0.5, 0.5);
-        std::vector<uchar> encoded;
-        cv::imencode(".jpg", half, encoded);
-        rec_stream->log("camera/main", rerun::EncodedImage::from_bytes(encoded));
-      }
-#endif
-    } else if (cv::waitKey(1) == 'q')
+      cv::resize(view, view, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
+      cv::imshow("sentry_debug", view);
+
+      // 侧向相机图传：直接读采集线程最新帧（与推理解耦，保证实时），检测框异步叠加
+      auto side_armors = perceptron.get_latest_armors();
+      auto show_side = [&](io::USBCamera & cam) {
+        cv::Mat img = cam.get_latest_img();
+        if (img.empty()) return;
+        draw_armors(img, side_armors[cam.device_name]);
+        cv::Mat small;
+        cv::resize(img, small, {}, 0.5, 0.5);
+        cv::imshow(cam.device_name, small);
+      };
+      show_side(left_camera);
+      show_side(right_camera);
+
+      if (cv::waitKey(1) == 'q') break;
+    } else if (has_display_env && cv::waitKey(1) == 'q')
       break;
   }
 

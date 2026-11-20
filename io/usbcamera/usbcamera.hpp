@@ -20,6 +20,8 @@ public:
   void read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp);
   bool try_read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp);
   uint64_t capture_count() const { return capture_count_; }
+  // 采集线程维护的最新帧，供图传直接读取（与推理解耦，保证实时）
+  cv::Mat get_latest_img();
   std::string device_name;
 
 private:
@@ -30,6 +32,8 @@ private:
   };
 
   std::mutex cap_mutex_;
+  std::mutex latest_img_mutex_;
+  cv::Mat latest_img_;
   cv::VideoCapture cap_;
   cv::Mat img_;
   std::string open_name_;
@@ -41,7 +45,7 @@ private:
   std::atomic<uint64_t> capture_count_{0};
   std::thread capture_thread_;
   std::thread daemon_thread_;
-  tools::ThreadSafeQueue<CameraData> queue_;
+  tools::ThreadSafeQueue<CameraData, true> queue_;
 
   void try_open();
   void open();

@@ -101,6 +101,12 @@ bool USBCamera::try_read(cv::Mat & img, std::chrono::steady_clock::time_point & 
   return true;
 }
 
+cv::Mat USBCamera::get_latest_img()
+{
+  std::lock_guard<std::mutex> lock(latest_img_mutex_);
+  return latest_img_.clone();
+}
+
 void USBCamera::open()
 {
   std::lock_guard<std::mutex> lock(cap_mutex_);
@@ -114,24 +120,24 @@ void USBCamera::open()
   tools::logger()->info("{} sharpness: {}", open_name_, sharpness_);
   cap_.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
   cap_.set(cv::CAP_PROP_FPS, usb_frame_rate_);
-  cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 1);
   cap_.set(cv::CAP_PROP_GAMMA, usb_gamma_);
   cap_.set(cv::CAP_PROP_GAIN, usb_gain_);
 
   if (sharpness_ == 2) {
     device_name = "left";
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
-    cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
   } else if (sharpness_ == 6) {
     device_name = "right";
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
-    cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
   }
 
+  cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
+  cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
+  // 分辨率变更会重置传感器曝光模式，所以手动曝光必须放在分辨率之后重新设置
+  cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 1);  // 1 = 手动曝光
+  cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
+
   tools::logger()->info("{} USBCamera opened", device_name);
-  // tools::logger()->info("USBCamera exposure time:{}", cap_.get(cv::CAP_PROP_EXPOSURE));
+  tools::logger()->info(
+    "{} exposure actual: {}", device_name, cap_.get(cv::CAP_PROP_EXPOSURE));
   tools::logger()->info("USBCamera fps:{}", cap_.get(cv::CAP_PROP_FPS));
   // tools::logger()->info("USBCamera gamma:{}", cap_.get(cv::CAP_PROP_GAMMA));
 
@@ -160,6 +166,10 @@ void USBCamera::open()
 
       auto timestamp = std::chrono::steady_clock::now();
       queue_.push({img, timestamp});
+      {
+        std::lock_guard<std::mutex> lock(latest_img_mutex_);
+        latest_img_ = img;
+      }
       capture_count_++;
     }
     ok_ = false;
